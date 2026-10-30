@@ -89,6 +89,7 @@ def test_encode_produces_hevc_and_records_job(media_db, tmp_media_roots):
     assert row["status"] == "done" and row["codec"] == "hevc"
     assert row["size_bytes"] == os.path.getsize(path)
     assert store.get_stats()["total_saved_bytes"] == job["saved_bytes"]
+    assert job["encoder"] == "cpu" and job["media_seconds"] == pytest.approx(6, abs=0.5)  # for Insights
 
 
 def test_trim_removes_intro(media_db, tmp_media_roots):

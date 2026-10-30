@@ -336,6 +336,13 @@ def update_job_progress(job_id: int, progress_pct: float, log_tail: str = None,
         })
 
 
+def set_job_stats(job_id: int, encoder: str, media_seconds: float | None) -> None:
+    """Record which encoder a job used and how many seconds of video it processed."""
+    with connect() as conn:
+        conn.execute("UPDATE media_jobs SET encoder=:e, media_seconds=:m WHERE id=:id",
+                     {"e": encoder, "m": media_seconds, "id": job_id})
+
+
 def set_job_status(job_id: int, status: str) -> None:
     col = "started_at" if status == "running" else "finished_at"
     with connect() as conn:

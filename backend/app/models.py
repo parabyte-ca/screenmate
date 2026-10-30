@@ -236,6 +236,9 @@ class MediaJob(Base):
     episode_count = Column(Integer, default=0)
     journey_id = Column(Integer, ForeignKey("journeys.id"), nullable=True, index=True)
     reason = Column(String, nullable=True)  # why it was queued, e.g. "Rule: Shrink to x265"
+    # For Insights' speed comparison: which encoder ran it, and how much video it processed.
+    encoder = Column(String, nullable=True)  # cpu | nvenc
+    media_seconds = Column(Float, nullable=True)
 
 
 class Journey(Base):

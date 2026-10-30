@@ -167,6 +167,10 @@ def _run_job(job: dict, cancel_event: threading.Event) -> None:
         return
 
     input_path = file_row["path"]
+    if job_type in ("encode", "trim"):
+        # Decided now: a GPU that isn't available falls back to the CPU in encoder.py.
+        used = "nvenc" if config.ENCODER_BACKEND == "nvenc" and encoder.NVENC_AVAILABLE else "cpu"
+        db.set_job_stats(job_id, used, file_row["duration_sec"])
     db.set_file_status(file_id, "processing")
     db.set_job_status(job_id, "running")
 
