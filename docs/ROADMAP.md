@@ -216,6 +216,136 @@ Other edits:
 - `docker build`, then `ffmpeg -version` inside the container.
 - `shellcheck` and the frontend build pass as before (the frontend is untouched).
 
+---
+
+# Fix CI on PR #1 (in progress)
+
+## Context
+On [parabyte-ca/screenmate#1](https://github.com/parabyte-ca/screenmate/pull/1) the `backend` job fails. All 714 tests pass. The job fails at the **shellcheck** step: the runner's newer shellcheck flags SC2015 ("A && B || C is not if-then-else") on three lines inherited from AuTorrent. The older shellcheck I ran locally didn't flag them. This PR's CI step is what introduced the check, so the fix belongs here.
+
+## Change
+Rewrite each line as an explicit `if`. Behaviour stays identical: an empty key is a no-op, and a failing `declare`/`chown` is still ignored.
+- `update.sh:150`: `if [[ -n "$key" ]]; then declare "$key"="$value" 2>/dev/null || true; fi`
+- `update.sh:206`: `if [[ -n "$_GIT_USER" ]]; then chown "$_GIT_USER:" "$ENV_FILE" 2>/dev/null || true; fi`
+- `scripts/upgrade-agent.sh:91`: same as line 150.
+
+## Verification
+- Install the latest `shellcheck-py`, reproduce SC2015 on the current head, apply the fix, and show shellcheck exiting with 0.
+- `pytest -q tests/test_update_script.py` (it exercises update.sh), then the full suite.
+- Push to `claude/great-wright-2btctp`; CI `backend` and `frontend` should both be green.
+
+PR #2 is merged and `main` is green.
+
+---
+
+# Phase 2: Live events, Journeys and the Activity page (current step)
+
+## Context
+Today the downloads page polls every 10 s. qBittorrent progress is only refreshed when someone loads that page, and completed downloads are only noticed by the hourly watchlist scan. The media engine (Phase 1) has no UI at all. Phase 2 adds:
+- one live event stream
+- a saved **Journey** for each item
+- an **Activity** page that replaces Downloads, plus a global status pill
+
+The branch is `claude/great-wright-2btctp`, freshly cut from `main`, with a new draft PR. The pipeline that links a download to its encode is Phase 3; Phase 2 adds the `journey_id` column that link will use.
+
+## Design: derive steps instead of copying them
+A journey's steps are **read from the rows that already exist**, not copied into new tables. That way they can't drift out of sync, and they survive restarts for free.
+- `found` and `download` steps come from the `Download` row, plus a live progress cache from qBittorrent.
+- `encode`, `split` and `trim` steps come from `MediaJob` rows that carry the journey's `journey_id`, including the job's `log_tail`, `progress_pct` and `saved_bytes`.
+- Phase 3 adds `library`, `notify` and `rename` steps, and the reason each step ran.
+
+New table `journeys` (in `models.py`):
+- `id`, `title`, `source` (`download` or `library`)
+- `download_id` (unique, nullable), `media_file_id` (nullable)
+- `status` (`active`, `done`, `failed` or `cancelled`), stored so filters and counts stay cheap
+- `created_at`, `updated_at`
+
+Migration: `ALTER TABLE media_jobs ADD COLUMN journey_id INTEGER`. The `media_jobs` table already exists in Phase 1 databases, so this goes in the `MIGRATIONS` list in `migrations.py`.
+
+## Backend
+1. **`services/events.py`**: a thread-safe pub/sub bus.
+   - `publish(type, data)` is safe to call from worker, scheduler and request threads.
+   - Each SSE subscriber gets an `asyncio.Queue`, fed through `loop.call_soon_threadsafe`.
+   - A ring buffer of the last 500 events with increasing ids lets a client that reconnects with `Last-Event-ID` replay what it missed. If the gap is too large, it gets a `resync` event instead.
+   - `progress` events are throttled to at most one per second per step.
+2. **`routers/events.py`**: `GET /api/events`, the SSE stream.
+   - It sends a `: keepalive` comment every 15 s (FileSplitter did the same because of Cloudflare's idle timeout).
+   - Auth uses `?token=` from Phase 1. Exempt it from GZip.
+3. **`services/journeys.py`**:
+   - `for_download(db, dl)`: get or create the journey, titled with the download title.
+   - `for_media_file(db, file_id)`: get or create one journey per file (`source=library`).
+   - `refresh(db, journey_id)`: recompute the status and publish `journey.updated` with the full snapshot.
+   - `snapshot(j)`: build the steps as described above.
+   - `stats()`: active count, failed in the last 24 h, bytes saved today (the sum of `media_jobs.saved_bytes` with `finished_at` today), and whether the queue is paused.
+4. **Hooks, one per source, so no call sites need changing:**
+   - **Downloads:** a SQLAlchemy `after_flush` listener on the session collects `Download` rows that were inserted or had their `status` changed (via attribute history). After commit, it creates or refreshes their journeys in a fresh session. This covers every place downloads are written: `routers/downloads.py:300`, `services/grab.py:75`, `services/scheduler.py:194`, `services/download_events.py:188/237`, and both status-sync paths.
+   - **Media jobs:** `services/media/store.py` is already the single choke point.
+     - `create_job` takes an optional `journey_id` and defaults it to `for_media_file`.
+     - `set_job_status` calls `journeys.refresh`.
+     - `update_job_progress` publishes a throttled `progress` event and does not write to the journey.
+5. **`services/download_poller.py`**: a live download feed.
+   - A daemon thread runs every 3 s, but only while at least one SSE client is connected and there are active downloads.
+   - It makes one `get_all_torrent_statuses()` call (`services/qbittorrent.py:84`) and publishes `progress` events with percentage, speed and ETA.
+   - When a torrent enters `QBITTORRENT_COMPLETE_STATES` (`services/qbit_states.py`) it calls the existing `scheduler._sync_download_statuses()`. Completion then shows up within about 3 s instead of up to an hour later.
+6. **`routers/activity.py`**:
+   - `GET /api/activity?filter=all|active|failed|done_today&limit=&before=` lists journey snapshots, newest-updated first.
+   - `GET /api/activity/{id}` returns the full snapshot with log tails.
+   - `GET /api/activity/stats`.
+   - `POST /api/activity/{id}/retry` and `POST /api/activity/{id}/cancel` act on the journey's current step.
+     - **Download step:** Retry reuses `download_events.retry_download`; Cancel reuses the existing download delete logic.
+     - **Media steps:** Retry re-queues the same job type (`store.create_job` with the same `journey_id`); Cancel reuses `routers/media._cancel_job_by_id`.
+   - A Skip step action comes in Phase 3 with the pipeline.
+   - `POST /api/activity/clear-finished`, which subsumes `downloads.clearFinished`.
+7. **Backfill:** on startup, create journeys for any `Download` or `MediaJob` that doesn't have one yet. It's idempotent, so existing installs get a populated Activity page.
+
+## Frontend
+- `src/events.tsx`: `EventsProvider` plus a `useEvent(type, handler)` hook.
+  - One shared `EventSource('/api/events?token=…')`, with a reconnect that backs off.
+  - Exposes the connection state, which the pill shows as a "live" dot.
+- `src/pages/Activity.tsx`, replacing `Downloads.tsx`:
+  - filter chips: All, Active, Failed, Done today
+  - journey cards with a step strip (icons for found → download → encode/split/trim), the current step's progress bar, speed and ETA
+  - the poster from the watchlist item when there is one
+- **Kept from Downloads (parity):** the stalled banner with its Re-search link, removing an entry, and Clear finished.
+- `src/components/JourneyDrawer.tsx`: a slide-over panel opened from a card.
+  - a timeline of steps with start and finish times and duration
+  - a collapsible ffmpeg or log tail
+  - Retry and Cancel buttons
+  - the result of each encode ("Saved 1.3 GB (−62 %)")
+- `src/components/StatusPill.tsx`: sits in the `Layout.tsx` sidebar header and the mobile header.
+  - Shows "3 active · 1 failed · 12.4 GB saved today".
+  - Clicking it opens /activity.
+  - Updates live from `stats` events.
+- Routing: `/activity` is added. `/downloads` becomes a `<Navigate to="/activity">`, so old bookmarks keep working. The nav entry "Downloads" becomes "Activity".
+- The `api.activity.*` types and calls go in `src/api/client.ts`, following the existing `req<T>` pattern.
+
+## Tests
+- `tests/test_events.py`:
+  - publishing from several threads reaches every subscriber
+  - `Last-Event-ID` replay, and `resync` when the gap is too large
+  - progress throttling
+  - an SSE stream test using `httpx`/TestClient that checks keepalives and that `?token=` auth applies
+- `tests/test_journeys.py`:
+  - creating a download through each write path (`grab_episode`, `add_download`, `retry_download`) creates exactly one journey
+  - status changes refresh it
+  - media jobs attach to their file's journey
+  - the snapshot has the right step order and statuses
+  - stats counts, including saved today
+  - backfill is idempotent
+- `tests/test_activity_routes.py`: filters, pagination, retry and cancel for both download and media steps, clear-finished.
+- `tests/test_download_poller.py`: with qBittorrent mocked, the poller publishes progress and triggers a sync when a torrent completes; with no subscribers it stays idle.
+- Frontend: `npm run build` (tsc). Playwright smoke test against uvicorn with a generated clip:
+  - open /activity
+  - queue an encode through the API and watch the card's progress move
+  - the drawer shows the log
+  - the pill counts update
+  - `/downloads` redirects
+
+## Verification
+- `pytest -q` passes, all existing tests plus the new ones.
+- Live: run uvicorn with media paths pointing at generated clips. Watch the stream with `curl -N "localhost:8765/api/events"` while queueing an encode, and check that `progress` and `journey.updated` events arrive. Then take Playwright screenshots of the Activity page and drawer in light and dark themes.
+- CI is green on the new PR. `docker build` still can't run in this environment; CI builds the image on `main`.
+
 ## Follow-ups to flag
 - The `anthropic-skills:autorrent` skill will be out of date. Once Phase 3 lands, replace it with a `screenmate` skill (use `skill-creator`).
 - The `homelab` and `plex` skills may refer to the old ports and containers. Review them after migration.

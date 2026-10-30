@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
+  Activity,
   AlertTriangle,
   ArrowUpCircle,
   CalendarDays,
@@ -20,12 +21,13 @@ import { useTheme, type Theme } from "../ThemeContext";
 import { authStore } from "../auth";
 import { api } from "../api/client";
 import OnboardingWizard from "./OnboardingWizard";
+import StatusPill from "./StatusPill";
 
 const nav = [
   { to: "/search",    label: "Search",    icon: Search        },
   { to: "/watchlist", label: "Watchlist", icon: Tv            },
   { to: "/calendar",  label: "Calendar",  icon: CalendarDays  },
-  { to: "/downloads", label: "Downloads", icon: Download      },
+  { to: "/activity",  label: "Activity",  icon: Activity      },
   { to: "/history",   label: "History",   icon: Clock         },
   { to: "/settings",  label: "Settings",  icon: Settings      },
   { to: "/updates",   label: "Updates",   icon: ArrowUpCircle },
@@ -131,6 +133,11 @@ export default function Layout() {
           )}
         </div>
 
+        {/* Live status pill */}
+        <div className={collapsed ? "pt-3" : "px-3 pt-3"}>
+          <StatusPill compact={collapsed} />
+        </div>
+
         {/* Expand button (collapsed state only) */}
         {collapsed && (
           <button
@@ -211,6 +218,9 @@ export default function Layout() {
       {/* main-scroll: on mobile adds padding to clear the bottom tab bar     */}
       {/* + iOS safe area; on md+ resets to zero (see index.css)              */}
       <main className="flex-1 overflow-y-auto main-scroll">
+        <div className="sticky top-0 z-30 flex justify-center border-b border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/90 px-4 py-2 backdrop-blur md:hidden">
+          <StatusPill />
+        </div>
         {lowSpace.length > 0 && (
           <div className="flex items-center gap-2 border-b border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-4 py-2 text-xs text-amber-800 dark:text-amber-300">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />

@@ -245,7 +245,8 @@ def purge_missing_files() -> int:
         placeholders = ",".join(f":{k}" for k in params)
         conn.execute(f"DELETE FROM media_jobs WHERE file_id IN ({placeholders})", params)
         conn.execute(f"DELETE FROM media_files WHERE id IN ({placeholders})", params)
-        return len(missing_ids)
+    journeys.prune_empty(_engine())
+    return len(missing_ids)
 
 
 def delete_file(file_id: int) -> None:
@@ -253,6 +254,7 @@ def delete_file(file_id: int) -> None:
     with connect() as conn:
         conn.execute("DELETE FROM media_jobs WHERE file_id=:id", {"id": file_id})
         conn.execute("DELETE FROM media_files WHERE id=:id", {"id": file_id})
+    journeys.prune_empty(_engine())
 
 
 def rename_file(file_id: int, new_path: str, new_filename: str) -> None:
@@ -266,8 +268,9 @@ def rename_file(file_id: int, new_path: str, new_filename: str) -> None:
 
 def clear_finished_jobs() -> int:
     with connect() as conn:
-        cur = conn.execute("DELETE FROM media_jobs WHERE status IN ('done','error','cancelled')")
-        return cur.rowcount
+        cleared = conn.execute("DELETE FROM media_jobs WHERE status IN ('done','error','cancelled')").rowcount
+    journeys.prune_empty(_engine())
+    return cleared
 
 
 def get_recent_jobs(limit: int = 20):

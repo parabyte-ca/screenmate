@@ -342,6 +342,62 @@ export interface UpdateStatus {
 
 // ── API client ────────────────────────────────────────────────────────────────
 
+export type StepStatus = "pending" | "running" | "done" | "failed" | "cancelled" | "skipped";
+
+export interface JourneyStep {
+  kind: "found" | "download" | "encode" | "split" | "trim" | string;
+  label: string;
+  status: StepStatus;
+  progress?: number;
+  speed?: number | null;
+  eta?: number | null;
+  detail?: string | null;
+  log?: string | null;
+  stale?: boolean;
+  size_bytes?: number | null;
+  saved_bytes?: number;
+  path?: string | null;
+  retry_count?: number;
+  started_at?: string | null;
+  finished_at?: string | null;
+  ref: { type: "download" | "media_job"; id: number };
+}
+
+export interface Journey {
+  id: number;
+  title: string;
+  source: "download" | "library";
+  status: "active" | "done" | "failed" | "cancelled";
+  download_id: number | null;
+  media_file_id: number | null;
+  poster_url: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  current_step: number;
+  saved_bytes: number;
+  steps: JourneyStep[];
+}
+
+export type ActivityFilter = "all" | "active" | "failed" | "done_today";
+
+export interface ActivityStats {
+  active: number;
+  failed_24h: number;
+  saved_today_bytes: number;
+  queue_paused: boolean;
+}
+
+export interface ProgressEvent {
+  key: string;
+  journey_id: number | null;
+  download_id?: number;
+  job_id?: number;
+  progress: number;
+  speed?: number | null;
+  eta?: number | null;
+  log?: string | null;
+}
+
 export const api = {
   search(q: string, indexer = "all", quality?: string, codec = "x265", filterAdult = true) {
     const p = new URLSearchParams({ q, indexer, codec, filter_adult: String(filterAdult) });
@@ -394,6 +450,17 @@ export const api = {
     clearFinished: () => req<{ ok: boolean; deleted: number }>("/downloads", { method: "DELETE" }),
     checkDuplicate: (data: { torrent_hash: string | null; torrent_name: string }) =>
       req<DuplicateCheckResult>("/downloads/check-duplicate", { method: "POST", body: JSON.stringify(data) }),
+  },
+
+  activity: {
+    list: (filter: ActivityFilter = "all", limit = 50, offset = 0) =>
+      req<{ total: number; items: Journey[] }>(`/activity?filter=${filter}&limit=${limit}&offset=${offset}`),
+    get: (id: number) => req<Journey>(`/activity/${id}`),
+    stats: () => req<ActivityStats>("/activity/stats"),
+    cancel: (id: number) => req<{ ok: boolean; msg: string }>(`/activity/${id}/cancel`, { method: "POST" }),
+    retry: (id: number) => req<{ ok: boolean; msg: string }>(`/activity/${id}/retry`, { method: "POST" }),
+    remove: (id: number) => req<{ ok: boolean }>(`/activity/${id}`, { method: "DELETE" }),
+    clearFinished: () => req<{ ok: boolean; cleared: number }>("/activity/clear-finished", { method: "POST" }),
   },
 
   history: {

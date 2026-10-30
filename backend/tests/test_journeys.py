@@ -177,3 +177,18 @@ def test_backfill_is_idempotent(Session, monkeypatch):
         assert db.query(Journey).count() == 2
         assert db.query(MediaJob).filter(MediaJob.journey_id.is_(None)).count() == 0
         assert {j.status for j in db.query(Journey)} == {"done"}
+
+
+def test_clearing_jobs_or_deleting_files_prunes_empty_journeys(Session, published):
+    fid = _file("/m/a.mkv")
+    job = store.create_job(fid, "encode")
+    store.set_job_status(job, "done")
+    other = _file("/m/b.mkv")
+    store.create_job(other, "trim")  # still queued: its journey must survive
+    assert store.clear_finished_jobs() == 1
+    with Session() as db:
+        assert [j.media_file_id for j in db.query(Journey)] == [other]
+    assert any(t == "journey.removed" for t, _ in published)
+    store.delete_file(other)
+    with Session() as db:
+        assert db.query(Journey).count() == 0

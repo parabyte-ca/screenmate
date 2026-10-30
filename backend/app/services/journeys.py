@@ -214,8 +214,8 @@ def refresh(db: Session, journey_id: int, *, publish: bool = True) -> dict | Non
     if j is None:
         return None
     steps = _steps(db, j)
-    if not steps and j.download_id is None and j.source == "download":
-        # Its download was deleted and nothing else hangs off it.
+    if not steps and j.download_id is None:
+        # Its download was deleted / its jobs cleared, and nothing else hangs off it.
         db.delete(j)
         db.commit()
         if publish:
@@ -357,6 +357,26 @@ def on_media_job_created(bind, file_id: int) -> int | None:
     except Exception:
         logger.exception("Could not attach media job to a journey")
         return None
+
+
+def prune_empty(bind) -> int:
+    """Drop journeys left with no download and no media jobs (after jobs are cleared)."""
+    try:
+        with Session(bind=bind) as db:
+            ids = [r[0] for r in db.execute(text(
+                "SELECT id FROM journeys WHERE download_id IS NULL"
+                " AND id NOT IN (SELECT journey_id FROM media_jobs WHERE journey_id IS NOT NULL)"))]
+            if not ids:
+                return 0
+            db.query(Journey).filter(Journey.id.in_(ids)).delete(synchronize_session=False)
+            db.commit()
+            for jid in ids:
+                events.publish("journey.removed", {"id": jid})
+            publish_stats(db)
+            return len(ids)
+    except Exception:
+        logger.exception("Pruning empty journeys failed")
+        return 0
 
 
 def on_media_job_changed(bind, journey_id: int | None) -> None:
