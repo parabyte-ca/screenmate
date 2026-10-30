@@ -540,3 +540,20 @@ class TestOwnerWithoutAName:
     def test_a_root_owned_checkout_still_runs_git_directly(self, tmp_path):
         proc, calls = run_update(tmp_path, owner="UNKNOWN", fake_owner_id="0")
         assert not any(c.startswith("sudo") for c in calls)
+
+
+class TestComposeOverride:
+    """setup.sh's docker-compose.override.yml must survive ./update.sh."""
+
+    def test_override_file_is_passed_to_compose(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir(parents=True, exist_ok=True)
+        (repo / "docker-compose.override.yml").write_text("services:\n  screenmate:\n    volumes: []\n")
+        proc, calls = run_update(tmp_path, "--no-git")
+        assert proc.returncode == 0, proc.stderr
+        ups = [c for c in calls if c.startswith("docker compose") and " up " in c]
+        assert ups and all("docker-compose.override.yml" in c for c in ups)
+
+    def test_no_override_file_no_extra_flag(self, tmp_path):
+        _, calls = run_update(tmp_path, "--no-git")
+        assert not any("docker-compose.override.yml" in c for c in calls)

@@ -27,6 +27,12 @@ ENV_FILE="$REPO_DIR/.env"
 # ── Defaults (docker-compose based deployment) ─────────────────────────────────
 
 COMPOSE_FILE="$REPO_DIR/docker-compose.yml"
+# setup.sh keeps per-install settings (media mounts, GPU) in the override file;
+# Compose only merges it automatically when no -f is given, so pass it too.
+COMPOSE_ARGS=(-f "$COMPOSE_FILE")
+if [[ -f "$REPO_DIR/docker-compose.override.yml" ]]; then
+    COMPOSE_ARGS+=(-f "$REPO_DIR/docker-compose.override.yml")
+fi
 BRANCH="main"
 
 # Options
@@ -155,10 +161,13 @@ fi
 # section)?  Comment lines start with '#', so they don't match.
 compose_builds_locally() {
     local cfg
-    if cfg="$(docker compose -f "$COMPOSE_FILE" config 2>/dev/null)"; then
+    if cfg="$(docker compose "${COMPOSE_ARGS[@]}" config 2>/dev/null)"; then
         grep -qE '^[[:space:]]+build:' <<<"$cfg"
     else
-        grep -qE '^[[:space:]]+build:' "$COMPOSE_FILE"   # comment lines start with '#', so they don't match
+        # comment lines start with '#', so they don't match
+        local files=("$COMPOSE_FILE")
+        [[ -f "$REPO_DIR/docker-compose.override.yml" ]] && files+=("$REPO_DIR/docker-compose.override.yml")
+        grep -qE '^[[:space:]]+build:' "${files[@]}"
     fi
 }
 # ── Version pinning (published-image deployments) ──────────────────────────────
@@ -178,7 +187,7 @@ image_version() {
 }
 running_version() {
     local cid
-    cid="$(docker compose -f "$COMPOSE_FILE" ps -q 2>/dev/null | head -1)"
+    cid="$(docker compose "${COMPOSE_ARGS[@]}" ps -q 2>/dev/null | head -1)"
     [[ -n "$cid" ]] || return 0
     docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null | _app_version
 }
@@ -326,10 +335,10 @@ fi
 if [[ "$PINNING" == true ]]; then
     export SCREENMATE_VERSION="${OPT_VERSION:-latest}"
     info "Pulling Docker image (${SCREENMATE_VERSION}) ..."
-    docker compose -f "$COMPOSE_FILE" pull
+    docker compose "${COMPOSE_ARGS[@]}" pull
     if [[ -z "$OPT_VERSION" ]]; then
         # Newest release: pin to the version the pulled image says it is.
-        _ref="$(docker compose -f "$COMPOSE_FILE" config --images 2>/dev/null | head -1)"
+        _ref="$(docker compose "${COMPOSE_ARGS[@]}" config --images 2>/dev/null | head -1)"
         _got="$(image_version "$_ref" || true)"
         if valid_semver "$_got"; then
             OPT_VERSION="$_got"
@@ -344,21 +353,21 @@ if [[ "$PINNING" == true ]]; then
     fi
 elif [[ "$OPT_PULL" == true ]]; then
     info "Pulling latest Docker image ..."
-    docker compose -f "$COMPOSE_FILE" pull
+    docker compose "${COMPOSE_ARGS[@]}" pull
 else
     info "Building Docker image ..."
-    docker compose -f "$COMPOSE_FILE" build
+    docker compose "${COMPOSE_ARGS[@]}" build
 fi
 
 # ── Deploy ─────────────────────────────────────────────────────────────────────
 
 info "Restarting container ..."
-docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
+docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans
 
 info "Waiting for health check ..."
 HEALTH_TRIES="${HEALTH_TRIES:-30}"
 TRIES=0
-until docker compose -f "$COMPOSE_FILE" ps | grep -q "healthy" || [[ $TRIES -ge $HEALTH_TRIES ]]; do
+until docker compose "${COMPOSE_ARGS[@]}" ps | grep -q "healthy" || [[ $TRIES -ge $HEALTH_TRIES ]]; do
     sleep 2
     TRIES=$((TRIES + 1))
 done
@@ -368,22 +377,22 @@ if [[ $TRIES -ge $HEALTH_TRIES ]]; then
     if [[ "$PINNING" == true && -n "$PREV_VERSION" ]]; then
         info "Rolling back to the previous release ($PREV_VERSION) ..."
         write_pin "$PREV_VERSION"
-        docker compose -f "$COMPOSE_FILE" pull || true
-        docker compose -f "$COMPOSE_FILE" up -d --remove-orphans || true
+        docker compose "${COMPOSE_ARGS[@]}" pull || true
+        docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans || true
         info "Rollback complete — running $PREV_VERSION. Remove SCREENMATE_VERSION from .env to follow 'latest' again."
     elif [[ -n "$ROLLBACK_REV" ]]; then
         info "Attempting automatic rollback to $ROLLBACK_REV ..."
         _git checkout "$ROLLBACK_REV" -- .
         if [[ "$OPT_PULL" == true ]]; then
-            docker compose -f "$COMPOSE_FILE" pull || true
+            docker compose "${COMPOSE_ARGS[@]}" pull || true
         else
-            docker compose -f "$COMPOSE_FILE" build || true
+            docker compose "${COMPOSE_ARGS[@]}" build || true
         fi
-        docker compose -f "$COMPOSE_FILE" up -d --remove-orphans || true
+        docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans || true
         info "Rollback complete."
     fi
     die "Upgrade failed — container health check timed out."
 fi
 
 info "Deployment complete."
-docker compose -f "$COMPOSE_FILE" ps
+docker compose "${COMPOSE_ARGS[@]}" ps

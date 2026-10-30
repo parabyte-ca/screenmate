@@ -22,17 +22,33 @@ ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search,
 
 ## Quick Start
 
-**Requirements:** Docker and Docker Compose on your server.
+**Requirements:** Docker with the Compose plugin, and git.
 
 ```bash
 git clone https://github.com/parabyte-ca/screenmate.git
 cd screenmate
-docker compose up -d
+./setup.sh
 ```
 
-Open **http://your-server-ip:4260**. Port `4260` was chosen so ScreenMate can run alongside AuTorrent (8180) and FileSplitter (4250) while you migrate. To change it, edit the left-hand side of `"4260:8000"` in `docker-compose.yml`.
+`setup.sh` asks for the port (default 4260), your time zone and your media folders, and spots an NVIDIA GPU if you have one. It then:
+- pulls the image and starts the container
+- waits until the app is healthy
+- offers to install the in-app upgrade helper
+- prints the address to open
 
-For GPU (NVENC) encoding, uncomment `ENCODER_BACKEND=nvenc` and the `reservations` block in `docker-compose.yml`.
+Your answers are saved to `.env` and `docker-compose.override.yml`. Both files stay out of git and are kept by `./update.sh`. Run `./setup.sh` again at any time to change them.
+
+Unattended install:
+
+```bash
+./setup.sh -y --media /mnt/nas/tv --media /mnt/nas/movies --port 4260
+```
+
+Other flags: `--gpu` / `--no-gpu`, `--build` (build from this checkout instead of pulling), `--tz America/Toronto`, `--agent` / `--no-agent`. See `./setup.sh --help`.
+
+Media folders are mounted at the same path inside the container. When qBittorrent runs on the same host, its download paths therefore match without any path mapping.
+
+**Coming from AuTorrent or FileSplitter?** The setup wizard (or **Settings → Data management**) imports your old `autorrent.db` and `filesplitter.db` with one upload each.
 
 ---
 

@@ -28,7 +28,7 @@ jobs:
         run: pytest -q
 
       - name: Shellcheck
-        run: shellcheck update.sh scripts/upgrade-agent.sh
+        run: shellcheck setup.sh update.sh scripts/upgrade-agent.sh
 
   frontend:
     runs-on: ubuntu-latest
