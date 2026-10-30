@@ -1,0 +1,513 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import {
+  ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderSearch, Layers, Loader2, MoreHorizontal,
+  Pause, Play, Scissors, SkipForward, Square, Timer, Trash2, X,
+} from "lucide-react";
+import { api, type MediaFile, type MediaJobType, type MediaStats } from "../api/client";
+import { useEvent } from "../events";
+import { fmtSize } from "../utils";
+
+// The media library (FileSplitter's Files tab): everything under the media
+// paths, with filters, per-file and bulk encode / split / trim, preview,
+// rename, skip and delete-to-trash.
+
+const PAGE_SIZE = 50;
+const RESOLUTIONS = ["original", "480p", "720p", "1080p", "1440p", "2160p"];
+
+const STATUS_STYLE: Record<string, string> = {
+  pending: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
+  queued: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",
+  processing: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400",
+  done: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
+  error: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",
+  skipped: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
+  cancelled: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
+};
+
+type Filters = Record<"q" | "category" | "status" | "codec" | "type" | "res" | "dur" | "size", string>;
+const FILTER_KEYS: (keyof Filters)[] = ["q", "category", "status", "codec", "type", "res", "dur", "size"];
+
+function fmtDur(s?: number | null) {
+  if (!s) return "—";
+  if (s < 60) return `${Math.round(s)}s`;
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+function resBucket(h?: number | null) {
+  if (!h) return "other";
+  if (h >= 2000) return "2160";
+  if (h >= 1000) return "1080";
+  if (h >= 700) return "720";
+  if (h >= 470) return "480";
+  return "other";
+}
+
+function matches(f: MediaFile, fl: Filters) {
+  if (fl.q && !f.filename.toLowerCase().includes(fl.q.toLowerCase())) return false;
+  if (fl.category && f.category !== fl.category) return false;
+  if (fl.status && f.status !== fl.status) return false;
+  if (fl.codec && (f.codec ?? "") !== fl.codec) return false;
+  if (fl.type === "anthology" && !f.is_anthology) return false;
+  if (fl.type === "normal" && f.is_anthology) return false;
+  if (fl.res && resBucket(f.height) !== fl.res) return false;
+  const min = (f.duration_sec ?? 0) / 60;
+  if (fl.dur === "lt30" && min >= 30) return false;
+  if (fl.dur === "30to90" && (min < 30 || min > 90)) return false;
+  if (fl.dur === "gt90" && min <= 90) return false;
+  const mb = (f.size_bytes ?? 0) / 1e6;
+  if (fl.size === "lt500" && mb >= 500) return false;
+  if (fl.size === "500to2000" && (mb < 500 || mb > 2000)) return false;
+  if (fl.size === "2000to5000" && (mb < 2000 || mb > 5000)) return false;
+  if (fl.size === "gt5000" && mb <= 5000) return false;
+  return true;
+}
+
+const busy = (f: MediaFile) => f.status === "queued" || f.status === "processing";
+
+const sel = "rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm text-gray-700 dark:text-gray-200";
+const btn = "flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-sm disabled:opacity-50";
+const btnGhost = `${btn} border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800`;
+const btnPrimary = `${btn} bg-blue-600 font-medium text-white hover:bg-blue-700`;
+const iconBtn = "rounded p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30";
+
+// ── Modals ────────────────────────────────────────────────────────────────────
+
+function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`w-full ${wide ? "max-w-3xl" : "max-w-md"} rounded-xl bg-white dark:bg-gray-900 shadow-xl`}>
+        <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+          <h3 className="min-w-0 flex-1 truncate font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+          <button onClick={onClose} aria-label="Close" className={iconBtn}><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+type Dialog =
+  | { kind: "encode"; files: MediaFile[] }
+  | { kind: "split"; files: MediaFile[] }
+  | { kind: "rename"; file: MediaFile }
+  | { kind: "delete"; files: MediaFile[] }
+  | { kind: "preview"; file: MediaFile };
+
+// ── Row actions menu ──────────────────────────────────────────────────────────
+
+function RowMenu({ f, onAction }: { f: MediaFile; onAction: (a: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  const item = (a: string, label: string, Icon: typeof Film, disabled = false, danger = false) => (
+    <button disabled={disabled} onClick={() => { setOpen(false); onAction(a); }}
+            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800 ${danger ? "text-red-600 dark:text-red-400" : "text-gray-700 dark:text-gray-200"}`}>
+      <Icon className="h-3.5 w-3.5" />{label}
+    </button>
+  );
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen((v) => !v)} aria-label={`More actions for ${f.filename}`} className={iconBtn}>
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg">
+          <div className="sm:hidden">
+            {item("encode", "Encode…", Film, busy(f))}
+            {item("split", "Split…", Scissors, busy(f))}
+          </div>
+          {item("trim", "Trim intro (3.5 s)", Timer, busy(f))}
+          {item("rename", "Rename…", Edit2, busy(f))}
+          {item("anthology", f.is_anthology ? "Mark not anthology" : "Mark as anthology", Layers)}
+          {f.anthology_override != null && item("anthology-auto", "Anthology: automatic", Layers)}
+          {busy(f) ? item("cancel", "Cancel job", Square) : item("skip", "Skip", SkipForward, f.status === "skipped")}
+          {item("delete", "Delete to trash…", Trash2, busy(f), true)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+export default function Library() {
+  const [params, setParams] = useSearchParams();
+  const filters = Object.fromEntries(FILTER_KEYS.map((k) => [k, params.get(k) ?? ""])) as Filters;
+  const page = Math.max(1, Number(params.get("page") || 1));
+  const [files, setFiles] = useState<MediaFile[]>([]);
+  const [stats, setStats] = useState<MediaStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const say = (m: string) => { setToast(m); window.setTimeout(() => setToast(null), 4000); };
+  const load = useCallback(async () => {
+    const [f, s] = await Promise.all([api.media.files(), api.media.stats()]);
+    setFiles(f);
+    setStats(s);
+    setLoading(false);
+  }, []);
+  useEffect(() => { load().catch(() => setLoading(false)); }, [load]);
+
+  // Live: refetch (at most every 1.5 s) when jobs change; poll while a scan runs.
+  const pending = useRef<number | undefined>(undefined);
+  const soon = useCallback(() => {
+    if (pending.current) return;
+    pending.current = window.setTimeout(() => { pending.current = undefined; load().catch(() => {}); }, 1500);
+  }, [load]);
+  useEvent("journey.updated", soon);
+  useEvent("journey.removed", soon);
+  useEffect(() => {
+    if (!stats?.scan_running) return;
+    const id = window.setInterval(() => load().catch(() => {}), 2000);
+    return () => window.clearInterval(id);
+  }, [stats?.scan_running, load]);
+
+  const setFilter = (k: keyof Filters, v: string) => {
+    const next = new URLSearchParams(params);
+    if (v) next.set(k, v); else next.delete(k);
+    next.delete("page");
+    setParams(next, { replace: true });
+  };
+  const setPage = (p: number) => {
+    const next = new URLSearchParams(params);
+    if (p > 1) next.set("page", String(p)); else next.delete("page");
+    setParams(next, { replace: true });
+  };
+  const clearFilters = () => setParams(new URLSearchParams(), { replace: true });
+
+  const categories = useMemo(() => [...new Set(files.map((f) => f.category))].sort(), [files]);
+  const codecs = useMemo(() => [...new Set(files.map((f) => f.codec ?? "").filter(Boolean))].sort(), [files]);
+  const filtered = useMemo(() => files.filter((f) => matches(f, filters)), [files, params]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const rows = filtered.slice((Math.min(page, pages) - 1) * PAGE_SIZE, Math.min(page, pages) * PAGE_SIZE);
+  const pickedFiles = files.filter((f) => picked.has(f.id));
+  const allOnPage = rows.length > 0 && rows.every((f) => picked.has(f.id));
+  const anyFilter = FILTER_KEYS.some((k) => filters[k]);
+
+  const togglePick = (id: number) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const togglePage = () => setPicked((s) => {
+    const n = new Set(s);
+    rows.forEach((f) => (allOnPage ? n.delete(f.id) : n.add(f.id)));
+    return n;
+  });
+
+  const run = async (fn: () => Promise<string | void>) => {
+    try {
+      const m = await fn();
+      if (m) say(m);
+    } catch (e) {
+      say((e as Error).message);
+    }
+    load().catch(() => {});
+  };
+
+  const queue = (list: MediaFile[], type: MediaJobType, resolution = "original", episodes = 0) => run(async () => {
+    const ids = list.filter((f) => !busy(f)).map((f) => f.id);
+    if (!ids.length) return "Those files are already queued or processing";
+    if (ids.length === 1) {
+      await api.media.queue(ids[0], type, resolution, episodes);
+      return `${type[0].toUpperCase()}${type.slice(1)} queued — follow it on Activity`;
+    }
+    const r = await api.media.queueBulk(ids, type, resolution, episodes);
+    setPicked(new Set());
+    return `Queued ${r.queued} file${r.queued === 1 ? "" : "s"}${r.skipped ? ` (${r.skipped} skipped)` : ""}`;
+  });
+
+  const onRowAction = (f: MediaFile, a: string) => {
+    if (a === "encode") setDialog({ kind: "encode", files: [f] });
+    else if (a === "split") setDialog({ kind: "split", files: [f] });
+    else if (a === "trim") queue([f], "trim");
+    else if (a === "rename") setDialog({ kind: "rename", file: f });
+    else if (a === "delete") setDialog({ kind: "delete", files: [f] });
+    else if (a === "skip") run(async () => { await api.media.skip(f.id); });
+    else if (a === "cancel") run(async () => (await api.media.cancel(f.id)).msg);
+    else if (a === "anthology") run(async () => { await api.media.setAnthology(f.id, !f.is_anthology); });
+    else if (a === "anthology-auto") run(async () => { await api.media.setAnthology(f.id, null); });
+  };
+
+  const queueAll = (type: MediaJobType) => {
+    const list = filtered.filter((f) => f.status === "pending" && (type !== "split" || f.is_anthology));
+    if (!list.length) return say(type === "split" ? "No pending anthologies match the filters" : "No pending files match the filters");
+    if (type === "encode") setDialog({ kind: "encode", files: list });
+    else setDialog({ kind: "split", files: list });
+  };
+
+  const tiles: [string, number | string, string][] = stats ? [
+    ["Files", stats.total, ""], ["Pending", stats.pending, "pending"], ["Queued", stats.queued, "queued"],
+    ["Processing", stats.processing, "processing"], ["Done", stats.done, "done"], ["Errors", stats.errors, "error"],
+  ] : [];
+
+  return (
+    <div className="mx-auto max-w-6xl p-4 md:p-6">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <h1 className="mr-auto text-xl font-bold text-gray-900 dark:text-gray-100">Library</h1>
+        <button className={btnGhost} onClick={() => run(async () => { await api.media.scan(); return "Scan started"; })} disabled={stats?.scan_running}>
+          {stats?.scan_running ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderSearch className="h-4 w-4" />}
+          {stats?.scan_running ? "Scanning…" : "Scan now"}
+        </button>
+        <button className={btnGhost} onClick={() => run(async () => { if (stats?.paused) await api.media.resume(); else await api.media.pause(); })}>
+          {stats?.paused ? <><Play className="h-4 w-4" />Resume queue</> : <><Pause className="h-4 w-4" />Pause queue</>}
+        </button>
+        <button className={btnGhost} onClick={() => queueAll("encode")}><Film className="h-4 w-4" />Encode all pending</button>
+        <button className={btnGhost} onClick={() => queueAll("split")}><Scissors className="h-4 w-4" />Split all anthologies</button>
+        <button className={btnGhost} title="Remove records for files that no longer exist on disk"
+                onClick={() => run(async () => `Removed ${(await api.media.purge()).removed} missing file record(s)`)}>
+          <Trash2 className="h-4 w-4" />Purge missing
+        </button>
+      </div>
+
+      {stats && (
+        <div className="mb-4 grid grid-cols-3 gap-2 sm:grid-cols-7">
+          {tiles.map(([label, value, status]) => (
+            <button key={label} onClick={() => setFilter("status", status === filters.status ? "" : status)}
+                    className={`rounded-xl border p-3 text-left transition-colors ${filters.status === status && status ? "border-blue-400 bg-blue-50 dark:bg-blue-950/40" : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-gray-300"}`}>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
+              <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{value}</div>
+            </button>
+          ))}
+          <div className="rounded-xl border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30 p-3">
+            <div className="text-xs text-green-700 dark:text-green-400">Space saved</div>
+            <div className="text-lg font-semibold text-green-800 dark:text-green-300">{fmtSize(stats.total_saved_bytes) === "—" ? "0 B" : fmtSize(stats.total_saved_bytes)}</div>
+          </div>
+        </div>
+      )}
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input value={filters.q} onChange={(e) => setFilter("q", e.target.value)} placeholder="Search file names…"
+               aria-label="Search file names" className={`${sel} min-w-[200px] flex-1`} />
+        <select aria-label="Category" className={sel} value={filters.category} onChange={(e) => setFilter("category", e.target.value)}>
+          <option value="">All folders</option>{categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select aria-label="Status" className={sel} value={filters.status} onChange={(e) => setFilter("status", e.target.value)}>
+          <option value="">All statuses</option>
+          {["pending", "queued", "processing", "done", "error", "skipped"].map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select aria-label="Codec" className={sel} value={filters.codec} onChange={(e) => setFilter("codec", e.target.value)}>
+          <option value="">All codecs</option>{codecs.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select aria-label="Type" className={sel} value={filters.type} onChange={(e) => setFilter("type", e.target.value)}>
+          <option value="">All types</option><option value="anthology">Anthologies</option><option value="normal">Normal</option>
+        </select>
+        <select aria-label="Resolution" className={sel} value={filters.res} onChange={(e) => setFilter("res", e.target.value)}>
+          <option value="">All resolutions</option><option value="2160">4K</option><option value="1080">1080p</option>
+          <option value="720">720p</option><option value="480">480p</option><option value="other">Other</option>
+        </select>
+        <select aria-label="Duration" className={sel} value={filters.dur} onChange={(e) => setFilter("dur", e.target.value)}>
+          <option value="">All lengths</option><option value="lt30">&lt; 30 min</option><option value="30to90">30–90 min</option><option value="gt90">&gt; 90 min</option>
+        </select>
+        <select aria-label="Size" className={sel} value={filters.size} onChange={(e) => setFilter("size", e.target.value)}>
+          <option value="">All sizes</option><option value="lt500">&lt; 500 MB</option><option value="500to2000">500 MB–2 GB</option>
+          <option value="2000to5000">2–5 GB</option><option value="gt5000">&gt; 5 GB</option>
+        </select>
+        {anyFilter && <button className="text-sm text-blue-600 hover:underline" onClick={clearFilters}>Clear filters</button>}
+      </div>
+
+      {pickedFiles.length > 0 && (
+        <div className="sticky top-12 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/60 px-3 py-2 md:top-2">
+          <span className="text-sm font-medium text-blue-800 dark:text-blue-200">{pickedFiles.length} selected</span>
+          <button className={btnPrimary} onClick={() => setDialog({ kind: "encode", files: pickedFiles })}><Film className="h-4 w-4" />Encode</button>
+          <button className={btnGhost} onClick={() => setDialog({ kind: "split", files: pickedFiles })}><Scissors className="h-4 w-4" />Split</button>
+          <button className={btnGhost} onClick={() => queue(pickedFiles, "trim")}><Timer className="h-4 w-4" />Trim</button>
+          <button className={btnGhost} onClick={() => run(async () => { const r = await api.media.bulk("skip", [...picked]); setPicked(new Set()); return `Skipped ${r.done}`; })}><SkipForward className="h-4 w-4" />Skip</button>
+          <button className={`${btnGhost} text-red-600 dark:text-red-400`} onClick={() => setDialog({ kind: "delete", files: pickedFiles })}><Trash2 className="h-4 w-4" />Delete</button>
+          <button className="ml-auto text-sm text-blue-700 dark:text-blue-300 hover:underline" onClick={() => setPicked(new Set())}>Clear selection</button>
+        </div>
+      )}
+
+      <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm">
+        {loading ? (
+          <div className="flex justify-center p-10"><Loader2 className="h-5 w-5 animate-spin text-blue-600" /></div>
+        ) : files.length === 0 ? (
+          <div className="p-10 text-center text-sm text-gray-500 dark:text-gray-400">
+            <Film className="mx-auto mb-2 h-6 w-6 text-gray-300 dark:text-gray-600" />
+            No files yet. Check your media folders in <Link to="/settings" className="text-blue-600 hover:underline">Settings → Media engine</Link>, then <b>Scan now</b>.
+          </div>
+        ) : rows.length === 0 ? (
+          <p className="p-10 text-center text-sm text-gray-500">No files match these filters.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="border-b border-gray-200 dark:border-gray-700 text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <tr>
+                <th className="w-10 px-3 py-2"><input type="checkbox" aria-label="Select page" checked={allOnPage} onChange={togglePage} /></th>
+                <th className="w-full px-2 py-2">Name</th>
+                <th className="hidden whitespace-nowrap px-2 py-2 md:table-cell">Codec</th>
+                <th className="hidden whitespace-nowrap px-2 py-2 md:table-cell">Res</th>
+                <th className="hidden whitespace-nowrap px-2 py-2 lg:table-cell">Length</th>
+                <th className="hidden whitespace-nowrap px-2 py-2 sm:table-cell">Size</th>
+                <th className="px-2 py-2">Status</th>
+                <th className="w-px px-2 py-2"><span className="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              {rows.map((f) => (
+                <tr key={f.id} className={picked.has(f.id) ? "bg-blue-50/60 dark:bg-blue-950/30" : "hover:bg-gray-50 dark:hover:bg-gray-800/50"}>
+                  <td className="px-3 py-2"><input type="checkbox" aria-label={`Select ${f.filename}`} checked={picked.has(f.id)} onChange={() => togglePick(f.id)} /></td>
+                  <td className="max-w-0 px-2 py-2">
+                    <p className="truncate font-medium text-gray-900 dark:text-gray-100" title={f.path}>{f.filename}</p>
+                    <p className="flex flex-wrap items-center gap-x-2 text-xs text-gray-500 dark:text-gray-400">
+                      <span>{f.category}</span>
+                      {!!f.is_anthology && <span className="rounded bg-violet-100 dark:bg-violet-900/40 px-1.5 text-violet-700 dark:text-violet-300">anthology</span>}
+                      <span className="md:hidden">{f.codec} · {f.height ? `${f.height}p` : "?"} · {fmtSize(f.size_bytes)}</span>
+                      {f.error_msg && f.status === "error" && <span className="truncate text-red-600 dark:text-red-400" title={f.error_msg}>{f.error_msg}</span>}
+                    </p>
+                  </td>
+                  <td className="hidden whitespace-nowrap px-2 py-2 text-gray-600 dark:text-gray-300 md:table-cell">{f.codec ?? "—"}</td>
+                  <td className="hidden whitespace-nowrap px-2 py-2 text-gray-600 dark:text-gray-300 md:table-cell">{f.height ? `${f.height}p` : "—"}</td>
+                  <td className="hidden whitespace-nowrap px-2 py-2 text-gray-600 dark:text-gray-300 lg:table-cell">{fmtDur(f.duration_sec)}</td>
+                  <td className="hidden whitespace-nowrap px-2 py-2 text-gray-600 dark:text-gray-300 sm:table-cell">{fmtSize(f.size_bytes)}</td>
+                  <td className="px-2 py-2">
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[f.status] ?? STATUS_STYLE.pending}`}>
+                      {f.status === "processing" && <Loader2 className="h-3 w-3 animate-spin" />}{f.status}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2">
+                    <div className="flex items-center justify-end">
+                      <button className={iconBtn} aria-label={`Preview ${f.filename}`} title="Preview" onClick={() => setDialog({ kind: "preview", file: f })}><Eye className="h-4 w-4" /></button>
+                      <button className={`${iconBtn} hidden sm:block`} aria-label={`Encode ${f.filename}`} title="Encode to x265" disabled={busy(f)} onClick={() => setDialog({ kind: "encode", files: [f] })}><Film className="h-4 w-4" /></button>
+                      <button className={`${iconBtn} hidden sm:block`} aria-label={`Split ${f.filename}`} title="Split scenes" disabled={busy(f)} onClick={() => setDialog({ kind: "split", files: [f] })}><Scissors className="h-4 w-4" /></button>
+                      <RowMenu f={f} onAction={(a) => onRowAction(f, a)} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {filtered.length > PAGE_SIZE && (
+        <div className="mt-3 flex items-center justify-center gap-3 text-sm text-gray-600 dark:text-gray-300">
+          <button className={iconBtn} aria-label="Previous page" disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft className="h-4 w-4" /></button>
+          Page {Math.min(page, pages)} of {pages} · {filtered.length} files
+          <button className={iconBtn} aria-label="Next page" disabled={page >= pages} onClick={() => setPage(page + 1)}><ChevronRight className="h-4 w-4" /></button>
+        </div>
+      )}
+
+      {toast && (
+        <div role="status" className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-lg md:bottom-6 dark:bg-gray-100 dark:text-gray-900">
+          {toast}
+        </div>
+      )}
+
+      {dialog?.kind === "encode" && <EncodeDialog files={dialog.files} onClose={() => setDialog(null)}
+                                                  onConfirm={(res) => { queue(dialog.files, "encode", res); setDialog(null); }} />}
+      {dialog?.kind === "split" && <SplitDialog files={dialog.files} onClose={() => setDialog(null)}
+                                                onConfirm={(n) => { queue(dialog.files, "split", "original", n); setDialog(null); }} />}
+      {dialog?.kind === "rename" && <RenameDialog file={dialog.file} onClose={() => setDialog(null)} onDone={(m) => { say(m); load(); }} />}
+      {dialog?.kind === "delete" && (
+        <Modal title={dialog.files.length === 1 ? `Delete ${dialog.files[0].filename}?` : `Delete ${dialog.files.length} files?`} onClose={() => setDialog(null)}>
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            Files move to the <code>.trash</code> folder in their media path and are removed for good after 30 days
+            (or when you empty the trash in Settings).
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <button className={btnGhost} onClick={() => setDialog(null)}>Cancel</button>
+            <button className={`${btn} bg-red-600 font-medium text-white hover:bg-red-700`} onClick={() => {
+              const ids = dialog.files.map((f) => f.id);
+              setDialog(null);
+              run(async () => {
+                if (ids.length === 1) { await api.media.remove(ids[0]); return "Moved to trash"; }
+                const r = await api.media.bulk("delete", ids);
+                setPicked(new Set());
+                return `Moved ${r.done} to trash${r.skipped ? ` (${r.skipped} busy, left alone)` : ""}${r.errors.length ? ` — ${r.errors[0]}` : ""}`;
+              });
+            }}>Move to trash</button>
+          </div>
+        </Modal>
+      )}
+      {dialog?.kind === "preview" && (
+        <Modal title={dialog.file.filename} onClose={() => setDialog(null)} wide>
+          <video src={api.media.streamUrl(dialog.file.id)} controls autoPlay className="max-h-[70vh] w-full rounded bg-black" />
+          <div className="mt-3 flex justify-end">
+            <a href={api.media.streamUrl(dialog.file.id, true)} className={btnGhost}><Download className="h-4 w-4" />Download</a>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function EncodeDialog({ files, onClose, onConfirm }: { files: MediaFile[]; onClose: () => void; onConfirm: (res: string) => void }) {
+  const [res, setRes] = useState("original");
+  const one = files.length === 1 ? files[0] : null;
+  return (
+    <Modal title={one ? `Encode ${one.filename}` : `Encode ${files.length} files`} onClose={onClose}>
+      <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">
+        Re-encode to HEVC (x265) using the quality and speed from Settings → Media engine. The original is replaced only after the new file checks out.
+        {one?.height ? ` Current resolution: ${one.height}p.` : ""}
+      </p>
+      <label className="block text-sm">
+        <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">Output resolution</span>
+        <select className={`${sel} w-full`} value={res} onChange={(e) => setRes(e.target.value)}>
+          {RESOLUTIONS.map((r) => <option key={r} value={r}>{r === "original" ? "Keep original" : r}</option>)}
+        </select>
+      </label>
+      <div className="mt-4 flex justify-end gap-2">
+        <button className={btnGhost} onClick={onClose}>Cancel</button>
+        <button className={btnPrimary} onClick={() => onConfirm(res)}><Film className="h-4 w-4" />Queue encode</button>
+      </div>
+    </Modal>
+  );
+}
+
+function SplitDialog({ files, onClose, onConfirm }: { files: MediaFile[]; onClose: () => void; onConfirm: (n: number) => void }) {
+  const [n, setN] = useState("");
+  return (
+    <Modal title={files.length === 1 ? `Split ${files[0].filename}` : `Split ${files.length} files`} onClose={onClose}>
+      <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">
+        Detects scene changes and cuts the file into one file per scene (no re-encode). The original is removed once every part checks out.
+      </p>
+      <label className="block text-sm">
+        <span className="mb-1 block font-medium text-gray-700 dark:text-gray-300">Number of scenes, if you know it</span>
+        <input className={`${sel} w-full`} type="number" min={0} placeholder="Leave blank to detect automatically" value={n} onChange={(e) => setN(e.target.value)} />
+      </label>
+      <div className="mt-4 flex justify-end gap-2">
+        <button className={btnGhost} onClick={onClose}>Cancel</button>
+        <button className={btnPrimary} onClick={() => onConfirm(Math.max(0, Number(n) || 0))}><Scissors className="h-4 w-4" />Queue split</button>
+      </div>
+    </Modal>
+  );
+}
+
+function RenameDialog({ file, onClose, onDone }: { file: MediaFile; onClose: () => void; onDone: (msg: string) => void }) {
+  const ext = file.filename.includes(".") ? file.filename.slice(file.filename.lastIndexOf(".")) : "";
+  const [name, setName] = useState(file.filename.slice(0, file.filename.length - ext.length));
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    try {
+      const r = await api.media.rename(file.id, name);
+      onDone(r.filename ? `Renamed to ${r.filename}` : r.msg ?? "Renamed");
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  return (
+    <Modal title="Rename file" onClose={onClose}>
+      <div className="flex items-center gap-1">
+        <input autoFocus aria-label="New name" className={`${sel} flex-1`} value={name} onChange={(e) => setName(e.target.value)}
+               onKeyDown={(e) => e.key === "Enter" && save()} />
+        <span className="text-sm text-gray-500">{ext}</span>
+      </div>
+      {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button className={btnGhost} onClick={onClose}>Cancel</button>
+        <button className={btnPrimary} onClick={save} disabled={!name.trim()}>Rename</button>
+      </div>
+    </Modal>
+  );
+}

@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 import Search from "./pages/Search";
 import Watchlist from "./pages/Watchlist";
 import Activity from "./pages/Activity";
+import Library from "./pages/Library";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
 import Updates from "./pages/Updates";
@@ -66,6 +67,7 @@ export default function App() {
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/browse" element={<Browse />} />
             <Route path="/activity" element={<Activity />} />
+            <Route path="/library" element={<Library />} />
             <Route path="/downloads" element={<Navigate to="/activity" replace />} />
             <Route path="/history" element={<History />} />
             <Route path="/settings" element={<Settings />} />

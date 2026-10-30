@@ -23,7 +23,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Unknown error" }));
-    throw new Error(err.detail ?? "Request failed");
+    throw new Error(err.detail ?? err.msg ?? "Request failed");
   }
   return res.json() as Promise<T>;
 }
@@ -481,6 +481,63 @@ export interface PathTestResult {
            rule_name?: string | null; actions?: string[]; error?: string }[];
 }
 
+export type MediaStatus = "pending" | "queued" | "processing" | "done" | "error" | "skipped" | "cancelled";
+export type MediaJobType = "encode" | "split" | "trim";
+
+export interface MediaFile {
+  id: number;
+  path: string;
+  filename: string;
+  size_bytes: number | null;
+  duration_sec: number | null;
+  codec: string | null;
+  width: number | null;
+  height: number | null;
+  is_anthology: number;
+  anthology_override: number | null;
+  status: MediaStatus;
+  error_msg: string | null;
+  category: string;
+  updated_at: string | null;
+}
+
+export interface MediaStats {
+  total: number; done: number; processing: number; queued: number; errors: number;
+  skipped: number; pending: number; total_saved_bytes: number; paused: boolean; scan_running: boolean;
+}
+
+export interface MediaSettings {
+  media_paths: string[];
+  scene_threshold: number;
+  min_scene_duration: number;
+  scene_method: string;
+  x265_crf: number;
+  x265_preset: string;
+  target_resolution: string;
+  encoder_backend: "cpu" | "nvenc";
+  max_workers: number;
+  ffprobe_timeout: number;
+  black_min_duration: number;
+  black_pix_th: number;
+  split_min_duration: number;
+  split_min_size: number;
+  split_keywords: string;
+  split_scene_method: string;
+  split_min_episode_gap: number;
+  split_black_min_duration: number;
+  split_freeze_min_duration: number;
+  split_episode_count: number;
+  tpdb_api_key_set: boolean;
+  resolutions: string[];
+  nvenc_available: boolean;
+  nvenc_probe_done: boolean;
+  nvenc_last_error: string | null;
+  cpu_presets: string[];
+  nvenc_presets: string[];
+}
+
+type MediaResult = { ok: boolean; msg?: string };
+
 export const api = {
   search(q: string, indexer = "all", quality?: string, codec = "x265", filterAdult = true) {
     const p = new URLSearchParams({ q, indexer, codec, filter_adult: String(filterAdult) });
@@ -544,6 +601,53 @@ export const api = {
     retry: (id: number) => req<{ ok: boolean; msg: string }>(`/activity/${id}/retry`, { method: "POST" }),
     remove: (id: number) => req<{ ok: boolean }>(`/activity/${id}`, { method: "DELETE" }),
     clearFinished: () => req<{ ok: boolean; cleared: number }>("/activity/clear-finished", { method: "POST" }),
+  },
+
+  media: {
+    files: () => req<MediaFile[]>("/media/files"),
+    stats: () => req<MediaStats>("/media/stats"),
+    scan: () => req<MediaResult>("/media/scan", { method: "POST" }),
+    queue: (fileId: number, jobType: MediaJobType, targetResolution = "original", episodeCount = 0) =>
+      req<MediaResult & { job_id: number }>("/media/queue", {
+        method: "POST",
+        body: JSON.stringify({ file_id: fileId, job_type: jobType, target_resolution: targetResolution, episode_count: episodeCount }),
+      }),
+    queueBulk: (fileIds: number[], jobType: MediaJobType, targetResolution = "original", episodeCount = 0) =>
+      req<{ ok: boolean; queued: number; skipped: number }>("/media/queue/bulk", {
+        method: "POST",
+        body: JSON.stringify({ file_ids: fileIds, job_type: jobType, target_resolution: targetResolution, episode_count: episodeCount }),
+      }),
+    bulk: (action: "skip" | "delete", fileIds: number[]) =>
+      req<{ ok: boolean; done: number; skipped: number; errors: string[] }>("/media/files/bulk", {
+        method: "POST", body: JSON.stringify({ action, file_ids: fileIds }),
+      }),
+    rename: (id: number, newName: string) =>
+      req<MediaResult & { filename?: string }>(`/media/files/${id}/rename`, { method: "POST", body: JSON.stringify({ new_name: newName }) }),
+    remove: (id: number) => req<MediaResult>(`/media/files/${id}/delete`, { method: "POST" }),
+    skip: (id: number) => req<MediaResult>(`/media/files/${id}/skip`, { method: "POST" }),
+    cancel: (id: number) => req<MediaResult>(`/media/files/${id}/cancel`, { method: "POST" }),
+    setAnthology: (id: number, value: boolean | null) =>
+      req<MediaResult>(`/media/files/${id}/anthology`, { method: "POST", body: JSON.stringify({ value }) }),
+    purge: () => req<{ ok: boolean; removed: number }>("/media/files/purge", { method: "POST" }),
+    pause: () => req<{ ok: boolean; paused: boolean }>("/media/queue/pause", { method: "POST" }),
+    resume: () => req<{ ok: boolean; paused: boolean }>("/media/queue/resume", { method: "POST" }),
+    /** URL for <video src> / download links; carries the token because media elements can't send headers. */
+    streamUrl: (id: number, download = false) => {
+      const p = new URLSearchParams();
+      const token = authStore.getToken();
+      if (token) p.set("token", token);
+      if (download) p.set("download", "1");
+      const q = p.toString();
+      return `${BASE}/media/files/${id}/stream${q ? `?${q}` : ""}`;
+    },
+    settings: () => req<MediaSettings>("/media/settings"),
+    saveSettings: (data: Record<string, unknown>) =>
+      req<MediaResult & { rejected?: string[] }>("/media/settings", { method: "POST", body: JSON.stringify(data) }),
+    recheckGpu: () => req<{ nvenc_available: boolean; nvenc_last_error: string | null }>("/media/encoder/recheck-gpu", { method: "POST" }),
+    setSavedBytes: (value: number) =>
+      req<{ ok: boolean; total_saved_bytes: number }>("/media/settings/saved-bytes", { method: "POST", body: JSON.stringify({ value }) }),
+    trash: () => req<{ size_bytes: number; file_count: number }>("/media/trash"),
+    emptyTrash: () => req<{ ok: boolean; freed_bytes: number; removed_files: number }>("/media/trash/empty", { method: "POST" }),
   },
 
   pipeline: {

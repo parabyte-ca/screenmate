@@ -353,6 +353,11 @@ Migration: `ALTER TABLE media_jobs ADD COLUMN journey_id INTEGER`. The `media_jo
 - Path mappings with a Test button; a library dry run with savings estimates and Apply; a disk-space guard; tick() every 2 min resumes plans.
 - Deferred to a later phase: the rename-from-template and move-to-folder steps (both conflict with seeding and library paths; they need their own design).
 
+# Phase 4: Library + Media engine settings (delivered)
+- Library page, matching FileSplitter's Files tab: stats tiles, 7 filters plus search, pagination, per-file preview/encode/split/trim/rename/skip/cancel/anthology/delete, a bulk bar, encode-all and split-all.
+- Settings → Media engine: media folders, GPU status and Recheck, encoder/CRF/preset/resolution, simultaneous jobs (applies live), ffprobe timeout, anthology and split settings, scene detection, TPDB key, saved-space counter, trash.
+- Worker fix: jobs are claimed only when a slot is free (FileSplitter marked every queued job running at once).
+
 ## Follow-ups to flag
 - The `anthropic-skills:autorrent` skill will be out of date. Once Phase 3 lands, replace it with a `screenmate` skill (use `skill-creator`).
 - The `homelab` and `plex` skills may refer to the old ports and containers. Review them after migration.

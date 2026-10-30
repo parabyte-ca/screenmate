@@ -6,7 +6,7 @@ A self-hosted media pipeline. It finds shows and movies, downloads them through 
 
 ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search, watchlist, downloads) and [FileSplitter](https://github.com/parabyte-ca/filesplitter) (scan, encode, split) into one app with one UI, one login, one database and one container.
 
-> **Status:** Phase 3 (auto pipeline). When a download finishes, ScreenMate runs your rules: for example, if a file is h264, trim the intro, re-encode it to x265, then refresh Plex/Jellyfin and notify you. You can follow every step live on the Activity page. Rules, path mapping and a dry run with estimated savings are under Settings → Auto pipeline. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** Phase 4 (Library). Everything FileSplitter did now has a ScreenMate UI. The **Library** page lets you filter, preview, encode, split, trim, rename, skip and delete files, one at a time or in bulk. **Settings → Media engine** covers media folders, the GPU/CPU encoder, quality, scene detection, splitting, the saved-space counter and the trash. Downloads flow into the library automatically through **Settings → Auto pipeline**. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
