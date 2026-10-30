@@ -6,7 +6,7 @@ A self-hosted media pipeline. It finds shows and movies, downloads them through 
 
 ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search, watchlist, downloads) and [FileSplitter](https://github.com/parabyte-ca/filesplitter) (scan, encode, split) into one app with one UI, one login, one database and one container.
 
-> **Status:** Phase 0 (scaffold). The app currently runs AuTorrent's full feature set under the ScreenMate name, with ffmpeg in the image. The FileSplitter engine, the auto pipeline and the new features land in phases. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** Phase 1 (media engine). AuTorrent's full feature set runs under the ScreenMate name, and FileSplitter's scan / x265 encode / scene split / intro trim / trash engine now runs inside the same container. You can use it through the API at `/docs` (under `/api/media`). It gets a UI in Phase 4. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 

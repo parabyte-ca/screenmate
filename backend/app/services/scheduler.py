@@ -649,6 +649,16 @@ def _get_digest_schedule() -> tuple[str, int]:
         db.close()
 
 
+def purge_old_trash() -> None:
+    """Permanently remove media .trash entries older than 30 days."""
+    from .media import trash
+
+    try:
+        trash.cleanup_trash(max_age_days=30)
+    except Exception:
+        logger.exception("Trash cleanup failed")
+
+
 def start_scheduler() -> None:
     from .download_events import process_download_events
     from .updater import daily_update_check
@@ -689,6 +699,13 @@ def start_scheduler() -> None:
         daily_update_check,
         trigger=CronTrigger(hour=3, minute=17, timezone="UTC"),
         id="update_check",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        purge_old_trash,
+        trigger=IntervalTrigger(hours=24),
+        next_run_time=datetime.now(timezone.utc),  # once at startup, then daily
+        id="trash_cleanup",
         replace_existing=True,
     )
     _scheduler.start()

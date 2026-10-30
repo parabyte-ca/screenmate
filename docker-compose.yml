@@ -22,6 +22,21 @@ services:
       - APP_UPGRADE_FOLDER=/upgrade
       # Set to false to disable automatic daily release checks
       # - APP_UPDATE_CHECK=true
+      # --- Media engine (scan / encode / split) ---
+      # Defaults shown; every one of these can also be changed live from the app
+      # (saved settings override the environment).
+      # Comma-separated container paths to scan (match your media volume mounts above)
+      # - MEDIA_PATHS=/mnt/nas/tv,/mnt/nas/movies
+      # - X265_CRF=28                # 18 = high quality, 28 = good, 35 = small
+      # - X265_PRESET=medium         # CPU: ultrafast..veryslow | NVENC: fast/medium/slow/hq/hp
+      # - TARGET_RESOLUTION=original # original | 480p | 720p | 1080p | 1440p | 2160p
+      # - MAX_WORKERS=2              # simultaneous ffmpeg jobs
+      # - SCENE_METHOD=auto          # auto | select | black
+      # - SPLIT_MIN_DURATION=5400    # anthology if >= 90 min ...
+      # - SPLIT_MIN_SIZE=2147483648  # ... or >= 2 GB, and the name has a keyword:
+      # - SPLIT_KEYWORDS=Vol,Compilation,Anthology,Collection
+      # - FFPROBE_TIMEOUT=60
+      # - TPDB_API_KEY=              # optional: online scene naming when splitting
       # --- NVIDIA GPU (NVENC) encoding ---
       # Uncomment this and the reservations block below. Requires NVIDIA drivers on
       # the host + nvidia-container-toolkit. Use CQ 22-24 for quality ~ CRF 28.
