@@ -1,3 +1,4 @@
+import logging
 import os
 import pathlib
 import secrets
@@ -13,10 +14,14 @@ from .migrations import run_migrations
 from .middleware.auth import AuthMiddleware
 from .models import Setting
 from .routers import (
-    auth, backup, browse, calendar, downloads, health, history, media, onboarding, paths,
-    profiles, search, settings, trakt, updates, watchlist,
+    activity, auth, backup, browse, calendar, downloads, events, health, history, media,
+    onboarding, paths, profiles, search, settings, trakt, updates, watchlist,
 )
+from .services import download_poller, journeys
 from .services import media as media_engine
+
+# Keep journeys in step with every Download write, wherever it happens.
+journeys.install_download_hooks()
 from .services.scheduler import start_scheduler, stop_scheduler
 
 STATIC_DIR = pathlib.Path("/app/static")
@@ -37,9 +42,19 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    db = SessionLocal()
+    try:
+        journeys.backfill(db)
+    except Exception:
+        logging.getLogger(__name__).exception("Journey backfill failed")
+    finally:
+        db.close()
+
     start_scheduler()
     media_engine.startup()
+    download_poller.start()
     yield
+    download_poller.stop()
     media_engine.shutdown()
     stop_scheduler()
 
@@ -71,6 +86,8 @@ app.include_router(browse.router, prefix="/api")
 app.include_router(trakt.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")
 app.include_router(media.router, prefix="/api")
+app.include_router(activity.router, prefix="/api")
+app.include_router(events.router, prefix="/api")
 
 # Serve compiled React frontend (production)
 if STATIC_DIR.exists():

@@ -234,3 +234,25 @@ class MediaJob(Base):
     finished_at = Column(String)
     saved_bytes = Column(BigInteger, default=0)
     episode_count = Column(Integer, default=0)
+    journey_id = Column(Integer, ForeignKey("journeys.id"), nullable=True, index=True)
+
+
+class Journey(Base):
+    """One item's trip through ScreenMate (found → download → encode/split/trim → …).
+
+    Steps are not stored here: they are derived from the Download row and the
+    MediaJob rows pointing at this journey (services/journeys.py), so they can
+    never drift from the real state. `status` is cached for cheap filtering.
+    """
+    __tablename__ = "journeys"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String, nullable=False)
+    source = Column(String, nullable=False)  # download | library
+    download_id = Column(Integer, ForeignKey("downloads.id", ondelete="SET NULL"),
+                         unique=True, nullable=True)
+    media_file_id = Column(Integer, ForeignKey("media_files.id", ondelete="SET NULL"),
+                           nullable=True, index=True)
+    status = Column(String, default="active", index=True)  # active | done | failed | cancelled
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), index=True)

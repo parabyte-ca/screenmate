@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 
 from ... import database
+from .. import events, journeys
 
 # Tests point this at their own engine; production uses ScreenMate's.
 engine = None
@@ -197,15 +198,30 @@ def get_stats() -> dict:
 # --- Jobs ---
 
 def create_job(file_id: int, job_type: str, target_resolution: str = "original",
-               episode_count: int = 0) -> int:
+               episode_count: int = 0, journey_id: int | None = None) -> int:
+    if journey_id is None:
+        journey_id = journeys.on_media_job_created(_engine(), file_id)
     with connect() as conn:
         cur = conn.execute(
             """INSERT INTO media_jobs (file_id, job_type, status, progress_pct, target_resolution,
-               episode_count, saved_bytes)
-               VALUES (:f, :t, 'queued', 0, :r, :e, 0)""",
-            {"f": file_id, "t": job_type, "r": target_resolution, "e": episode_count},
+               episode_count, saved_bytes, journey_id)
+               VALUES (:f, :t, 'queued', 0, :r, :e, 0, :j)""",
+            {"f": file_id, "t": job_type, "r": target_resolution, "e": episode_count, "j": journey_id},
         )
-        return cur.lastrowid
+        job_id = cur.lastrowid
+    journeys.on_media_job_changed(_engine(), journey_id)
+    return job_id
+
+
+def _job_meta(job_id: int) -> tuple[int | None, str | None]:
+    """(journey_id, status) for a job."""
+    with connect() as conn:
+        row = _one(conn.execute("SELECT journey_id, status FROM media_jobs WHERE id=:id", {"id": job_id}))
+        return (row["journey_id"], row["status"]) if row else (None, None)
+
+
+def _journey_of(job_id: int) -> int | None:
+    return _job_meta(job_id)[0]
 
 
 def get_active_jobs():
@@ -301,6 +317,18 @@ def update_job_progress(job_id: int, progress_pct: float, log_tail: str = None,
                 "UPDATE media_jobs SET progress_pct=:p, log_tail=:l WHERE id=:id",
                 {"p": progress_pct, "l": log_tail, "id": job_id},
             )
+    journey_id, status = _job_meta(job_id)
+    if status != "running":
+        # The worker writes the final message / saved_bytes after setting the
+        # terminal status, so this is the write that completes the journey step.
+        journeys.on_media_job_changed(_engine(), journey_id)
+        return
+    key = f"job:{job_id}"
+    if events.bus.ready(key):
+        events.publish("progress", {
+            "key": key, "journey_id": journey_id, "job_id": job_id,
+            "progress": round(progress_pct or 0, 1), "log": log_tail,
+        })
 
 
 def set_job_status(job_id: int, status: str) -> None:
@@ -310,6 +338,7 @@ def set_job_status(job_id: int, status: str) -> None:
             f"UPDATE media_jobs SET status=:s, {col}=:now WHERE id=:id",
             {"s": status, "now": _now(), "id": job_id},
         )
+    journeys.on_media_job_changed(_engine(), _journey_of(job_id))
 
 
 def dequeue_next_job():
@@ -326,7 +355,9 @@ def dequeue_next_job():
         ).rowcount
         if updated == 0:
             return None
-        return _one(conn.execute("SELECT * FROM media_jobs WHERE id=:id", {"id": row["id"]}))
+        job = _one(conn.execute("SELECT * FROM media_jobs WHERE id=:id", {"id": row["id"]}))
+    journeys.on_media_job_changed(_engine(), job["journey_id"])
+    return job
 
 
 # --- Settings (ScreenMate's shared settings table) ---
