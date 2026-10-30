@@ -147,7 +147,7 @@ if [[ -f "$ENV_FILE" ]]; then
         value="${value%\"}"
         value="${value#\'}"
         value="${value%\'}"
-        [[ -n "$key" ]] && declare "$key"="$value" 2>/dev/null || true
+        if [[ -n "$key" ]]; then declare "$key"="$value" 2>/dev/null || true; fi
     done < "$ENV_FILE"
 fi
 
@@ -203,7 +203,7 @@ write_pin() {
         { [[ -n "$kept" ]] && printf '%s\n' "$kept"; printf 'SCREENMATE_VERSION=%s\n' "$version"; } > "$ENV_FILE"
     else
         printf 'SCREENMATE_VERSION=%s\n' "$version" > "$ENV_FILE"
-        [[ -n "$_GIT_USER" ]] && chown "$_GIT_USER:" "$ENV_FILE" 2>/dev/null || true
+        if [[ -n "$_GIT_USER" ]]; then chown "$_GIT_USER:" "$ENV_FILE" 2>/dev/null || true; fi
     fi
     export SCREENMATE_VERSION="$version"
 }
