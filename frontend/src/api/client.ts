@@ -553,6 +553,11 @@ export interface ImportRunResult {
   results: { token: string; kind: "autorrent" | "filesplitter"; imported: Record<string, number> }[];
 }
 
+export interface PushConfig {
+  public_key: string;
+  devices: { id: number; label: string | null; created_at: string | null }[];
+}
+
 export const api = {
   search(q: string, indexer = "all", quality?: string, codec = "x265", filterAdult = true) {
     const p = new URLSearchParams({ q, indexer, codec, filter_adult: String(filterAdult) });
@@ -663,6 +668,16 @@ export const api = {
       req<{ ok: boolean; total_saved_bytes: number }>("/media/settings/saved-bytes", { method: "POST", body: JSON.stringify({ value }) }),
     trash: () => req<{ size_bytes: number; file_count: number }>("/media/trash"),
     emptyTrash: () => req<{ ok: boolean; freed_bytes: number; removed_files: number }>("/media/trash/empty", { method: "POST" }),
+  },
+
+  push: {
+    config: () => req<PushConfig>("/push/config"),
+    subscribe: (subscription: PushSubscriptionJSON, label: string) =>
+      req<{ ok: boolean; id: number }>("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription, label }) }),
+    unsubscribe: (endpoint: string) =>
+      req<{ ok: boolean }>("/push/unsubscribe", { method: "POST", body: JSON.stringify({ endpoint }) }),
+    removeDevice: (id: number) => req<{ ok: boolean }>(`/push/devices/${id}`, { method: "DELETE" }),
+    test: () => req<{ ok: boolean; sent: number }>("/push/test", { method: "POST" }),
   },
 
   importer: {

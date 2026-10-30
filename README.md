@@ -6,7 +6,7 @@ A self-hosted media pipeline. It finds shows and movies, downloads them through 
 
 ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search, watchlist, downloads) and [FileSplitter](https://github.com/parabyte-ca/filesplitter) (scan, encode, split) into one app with one UI, one login, one database and one container.
 
-> **Status:** Phase 5 (migration). `./setup.sh` installs everything in one go. The setup wizard imports your AuTorrent and FileSplitter databases: watchlist, history, folders, profiles, settings, media library and saved-space total. Next comes the command palette, PWA and push notifications. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** Phase 6 (polish). **Ctrl/⌘+K** opens a command palette for any page, action, show or file. ScreenMate installs as an app, and sends **push notifications** to your phone (Settings → Notifications; needs HTTPS, e.g. a Cloudflare Tunnel). Next comes the Insights page. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 

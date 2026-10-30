@@ -44,3 +44,7 @@ jobs:
       - name: Install and build
         working-directory: frontend
         run: npm ci && npm run build
+
+      - name: Service worker tests
+        working-directory: frontend
+        run: node --test "tests/*.test.mjs"

@@ -5,6 +5,7 @@ import { authStore } from "../auth";
 import ImportPanel from "../components/ImportPanel";
 import MediaSettings from "../components/MediaSettings";
 import PipelineSettings from "../components/PipelineSettings";
+import PushSettings from "../components/PushSettings";
 
 const FIELD = [
   "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm",
@@ -1029,6 +1030,9 @@ export default function Settings() {
 
         {/* Notifications */}
         <Section title="Notifications">
+          <div className="mb-5 border-b border-gray-100 dark:border-gray-800 pb-5">
+            <PushSettings />
+          </div>
           <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
             Uses{" "}
             <a href="https://github.com/caronc/apprise" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 underline">
