@@ -175,6 +175,10 @@ def _current_index(steps: list[dict]) -> int:
     for i, s in enumerate(steps):
         if s["status"] in ("running", "pending", "failed"):
             return i
+    # Finished: point at the last step that actually ran (not a skipped tail).
+    for i in range(len(steps) - 1, -1, -1):
+        if steps[i]["status"] != "skipped":
+            return i
     return len(steps) - 1
 
 

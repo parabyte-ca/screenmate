@@ -358,9 +358,10 @@ export interface JourneyStep {
   saved_bytes?: number;
   path?: string | null;
   retry_count?: number;
+  reason?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
-  ref: { type: "download" | "media_job"; id: number };
+  ref: { type: "download" | "media_job" | "plan"; id: number };
 }
 
 export interface Journey {
@@ -396,6 +397,88 @@ export interface ProgressEvent {
   speed?: number | null;
   eta?: number | null;
   log?: string | null;
+}
+
+export type PipelineActionType = "trim" | "encode" | "split";
+
+export interface PipelineAction {
+  type: PipelineActionType;
+  resolution?: string;
+  episode_count?: number;
+}
+
+export interface PipelineMatch {
+  source?: "any" | "download" | "scan";
+  codecs?: string[];
+  min_height?: number | null;
+  max_height?: number | null;
+  min_size_mb?: number | null;
+  min_duration_min?: number | null;
+  max_duration_min?: number | null;
+  keywords?: string[];
+  anthology?: boolean | null;
+  path_prefix?: string | null;
+  watchlist_ids?: number[];
+}
+
+export interface PipelineRule {
+  id: number;
+  name: string;
+  enabled: boolean;
+  priority: number;
+  match: PipelineMatch;
+  actions: PipelineAction[];
+}
+
+export type PipelineRuleInput = Omit<PipelineRule, "id" | "priority"> & { priority?: number };
+
+export interface PipelineTemplate {
+  name: string;
+  description: string;
+  match: PipelineMatch;
+  actions: PipelineAction[];
+}
+
+export interface PipelineSettings {
+  pipeline_enabled: boolean;
+  pipeline_on_scan: boolean;
+  pipeline_remove_torrent: boolean;
+}
+
+export interface PathMappingRow {
+  id?: number;
+  remote_prefix: string;
+  local_prefix: string;
+}
+
+export interface PipelinePreviewItem {
+  file_id: number;
+  filename: string;
+  path: string;
+  codec: string | null;
+  height: number | null;
+  size_bytes: number;
+  rule_id: number | null;
+  rule_name: string;
+  actions: PipelineActionType[];
+  est_saved_bytes: number;
+}
+
+export interface PipelinePreview {
+  count: number;
+  total_size_bytes: number;
+  est_saved_bytes: number;
+  encode_ratio: number;
+  items: PipelinePreviewItem[];
+}
+
+export interface PathTestResult {
+  path: string;
+  mapped: string;
+  exists: boolean;
+  video_files: number;
+  files: { path: string; filename?: string; codec?: string; height?: number; size_bytes?: number;
+           rule_name?: string | null; actions?: string[]; error?: string }[];
 }
 
 export const api = {
@@ -461,6 +544,32 @@ export const api = {
     retry: (id: number) => req<{ ok: boolean; msg: string }>(`/activity/${id}/retry`, { method: "POST" }),
     remove: (id: number) => req<{ ok: boolean }>(`/activity/${id}`, { method: "DELETE" }),
     clearFinished: () => req<{ ok: boolean; cleared: number }>("/activity/clear-finished", { method: "POST" }),
+  },
+
+  pipeline: {
+    settings: () => req<PipelineSettings>("/pipeline/settings"),
+    saveSettings: (data: Partial<PipelineSettings>) =>
+      req<PipelineSettings>("/pipeline/settings", { method: "PUT", body: JSON.stringify(data) }),
+    templates: () => req<PipelineTemplate[]>("/pipeline/templates"),
+    rules: () => req<PipelineRule[]>("/pipeline/rules"),
+    createRule: (data: PipelineRuleInput) =>
+      req<PipelineRule>("/pipeline/rules", { method: "POST", body: JSON.stringify(data) }),
+    updateRule: (id: number, data: PipelineRuleInput) =>
+      req<PipelineRule>(`/pipeline/rules/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    deleteRule: (id: number) => req(`/pipeline/rules/${id}`, { method: "DELETE" }),
+    reorder: (ids: number[]) =>
+      req<PipelineRule[]>("/pipeline/rules/reorder", { method: "POST", body: JSON.stringify({ ids }) }),
+    mappings: () => req<PathMappingRow[]>("/pipeline/mappings"),
+    saveMappings: (rows: PathMappingRow[]) =>
+      req<PathMappingRow[]>("/pipeline/mappings", { method: "PUT", body: JSON.stringify(rows) }),
+    testPath: (path: string) =>
+      req<PathTestResult>("/pipeline/test-path", { method: "POST", body: JSON.stringify({ path }) }),
+    preview: (rule?: Partial<PipelineRuleInput>) =>
+      req<PipelinePreview>("/pipeline/preview", { method: "POST", body: JSON.stringify(rule ? { rule } : {}) }),
+    apply: (fileIds: number[], ruleId?: number | null) =>
+      req<{ ok: boolean; queued: number }>("/pipeline/apply", {
+        method: "POST", body: JSON.stringify({ file_ids: fileIds, rule_id: ruleId ?? undefined }),
+      }),
   },
 
   history: {

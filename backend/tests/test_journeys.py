@@ -192,3 +192,9 @@ def test_clearing_jobs_or_deleting_files_prunes_empty_journeys(Session, publishe
     store.delete_file(other)
     with Session() as db:
         assert db.query(Journey).count() == 0
+
+
+def test_current_step_of_finished_journey_skips_skipped_tail():
+    steps = [{"status": "done"}, {"status": "skipped"}, {"status": "skipped"}]
+    assert journeys._current_index(steps) == 0
+    assert journeys._current_index([{"status": "done"}, {"status": "failed"}, {"status": "skipped"}]) == 1

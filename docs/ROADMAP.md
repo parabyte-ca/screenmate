@@ -346,6 +346,13 @@ Migration: `ALTER TABLE media_jobs ADD COLUMN journey_id INTEGER`. The `media_jo
 - Live: run uvicorn with media paths pointing at generated clips. Watch the stream with `curl -N "localhost:8765/api/events"` while queueing an encode, and check that `progress` and `journey.updated` events arrive. Then take Playwright screenshots of the Activity page and drawer in light and dark themes.
 - CI is green on the new PR. `docker build` still can't run in this environment; CI builds the image on `main`.
 
+# Phase 3: Auto pipeline (delivered)
+- Rules: conditions plus ordered steps (trim → encode → split), with templates, reordering, and a preview in the editor.
+- Plans run one step per file at a time and advance as each job finishes, then refresh the library and notify.
+- Downloads: the torrent is removed from qBittorrent first (files kept), or the plan waits while it's still seeding.
+- Path mappings with a Test button; a library dry run with savings estimates and Apply; a disk-space guard; tick() every 2 min resumes plans.
+- Deferred to a later phase: the rename-from-template and move-to-folder steps (both conflict with seeding and library paths; they need their own design).
+
 ## Follow-ups to flag
 - The `anthropic-skills:autorrent` skill will be out of date. Once Phase 3 lands, replace it with a `screenmate` skill (use `skill-creator`).
 - The `homelab` and `plex` skills may refer to the old ports and containers. Review them after migration.
