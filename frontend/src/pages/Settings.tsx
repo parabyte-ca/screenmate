@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Download, Edit2, FolderOpen, Loader2, Plus, Save, Star, Trash2, Upload } from "lucide-react";
 import { api, type DownloadPath, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
+import MediaSettings from "../components/MediaSettings";
 import PipelineSettings from "../components/PipelineSettings";
 
 const FIELD = [
@@ -793,6 +794,11 @@ export default function Settings() {
               </span>
             )}
           </div>
+        </Section>
+
+        {/* Media engine */}
+        <Section title="Media engine">
+          <MediaSettings />
         </Section>
 
         {/* Auto pipeline */}

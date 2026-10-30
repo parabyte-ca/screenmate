@@ -28,5 +28,6 @@ def shutdown() -> None:
     """Stop running ffmpeg jobs so they clean up their temp files before exit."""
     from . import worker
 
+    worker.stop()
     for event in list(worker._cancel_events.values()):
         event.set()

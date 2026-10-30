@@ -125,3 +125,41 @@ def test_settings_roundtrip(media_db):
     store.set_setting("x265_crf", "23")
     assert store.get_setting("x265_crf") == "23"
     assert store.get_settings(["x265_crf", "missing"]) == {"x265_crf": "23"}
+
+
+def test_worker_claims_jobs_only_when_a_slot_is_free(media_db, monkeypatch):
+    """Queued jobs must stay queued until a worker can actually run them."""
+    import time
+
+    from app.services.media import worker
+
+    monkeypatch.setattr(config, "MAX_WORKERS", 1)
+    monkeypatch.setattr(config, "ENCODER_BACKEND", "cpu")
+    gate = threading.Event()
+    started = []
+
+    def fake_run(job, cancel_event):
+        started.append(job["id"])
+        gate.wait(5)
+        store.set_job_status(job["id"], "done")
+
+    monkeypatch.setattr(worker, "_run_job", fake_run)
+    monkeypatch.setattr(worker, "_active", 0)
+    ids = [store.create_job(_file(f"/m/{n}.mkv"), "encode") for n in range(3)]
+    worker.start()
+    deadline = time.monotonic() + 5
+    while not started and time.monotonic() < deadline:
+        time.sleep(0.05)
+    time.sleep(0.3)
+    assert started == [ids[0]]
+    assert [store.get_job(i)["status"] for i in ids] == ["running", "queued", "queued"]
+    monkeypatch.setattr(config, "MAX_WORKERS", 2)  # raised live from Settings
+    with worker._slots:
+        worker._slots.notify_all()
+    deadline = time.monotonic() + 5
+    while len(started) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert started == ids[:2]
+    worker.stop()  # no loop may outlive this test
+    gate.set()
+    worker.resume()

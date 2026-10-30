@@ -26,10 +26,22 @@ _paused.set()  # not paused by default
 
 _cancel_events: dict[int, threading.Event] = {}
 
+# Jobs are only claimed from the queue when a slot is free, so queued jobs stay
+# "queued" (FileSplitter claimed everything at once and marked it running while
+# it waited in the thread pool). The limit is read live from config.MAX_WORKERS,
+# so changing it in Settings takes effect without a restart.
+_POOL_SIZE = 16
+_slots = threading.Condition()
+_active = 0
+_stop = threading.Event()
+
 
 def start(num_workers: int = None) -> None:
     global _executor
-    _executor = ThreadPoolExecutor(max_workers=num_workers or config.MAX_WORKERS)
+    if num_workers:
+        config.MAX_WORKERS = num_workers
+    _executor = ThreadPoolExecutor(max_workers=_POOL_SIZE)
+    _stop.clear()
     if db.get_setting('queue_paused', '0') == '1':
         _paused.clear()
         logger.info("Queue starting in paused state (persisted)")
@@ -62,13 +74,24 @@ def cancel_job(job_id: int) -> bool:
     return False
 
 
+def stop() -> None:
+    """Stop claiming new jobs (running jobs carry on until they finish or are cancelled)."""
+    _stop.set()
+    _paused.set()  # release a loop parked on pause so it can exit
+
+
 def _queue_loop() -> None:
-    while True:
+    while not _stop.is_set():
         try:
-            _paused.wait()
+            if not _paused.wait(timeout=1):
+                continue
+            if _stop.is_set():
+                break
             if config.ENCODER_BACKEND == "nvenc" and not encoder.PROBE_DONE.is_set():
                 # Don't let jobs fall back to CPU while the boot-time GPU probe is still running.
                 encoder.PROBE_DONE.wait(timeout=5)
+                continue
+            if not _wait_for_slot():
                 continue
             job = db.dequeue_next_job()
             if job:
@@ -76,12 +99,39 @@ def _queue_loop() -> None:
                 job_id = job_dict["id"]
                 cancel_event = threading.Event()
                 _cancel_events[job_id] = cancel_event  # register BEFORE submit
-                _executor.submit(_run_job, job_dict, cancel_event)
+                _claim_slot()
+                _executor.submit(_run_in_slot, job_dict, cancel_event)
             else:
                 time.sleep(3)
         except Exception:
             logger.exception("Queue loop error — retrying in 5s")
             time.sleep(5)
+
+
+def _wait_for_slot(timeout: float = 5.0) -> bool:
+    with _slots:
+        return _slots.wait_for(lambda: _active < max(1, config.MAX_WORKERS), timeout=timeout)
+
+
+def _claim_slot() -> None:
+    global _active
+    with _slots:
+        _active += 1
+
+
+def _run_in_slot(job: dict, cancel_event: threading.Event) -> None:
+    global _active
+    try:
+        _run_job(job, cancel_event)
+    finally:
+        with _slots:
+            _active -= 1
+            _slots.notify_all()
+
+
+def active_count() -> int:
+    with _slots:
+        return _active
 
 
 def _run_job(job: dict, cancel_event: threading.Event) -> None:
