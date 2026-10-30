@@ -1,5 +1,5 @@
 // Unit tests for public/push-sw.js with a fake service-worker global.
-// Run: node --test "tests/*.test.mjs"
+// Run: node --test tests/push-sw.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
