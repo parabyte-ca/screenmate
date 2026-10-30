@@ -52,7 +52,7 @@ def seed(db):
     for added, size in [(now, 5000), (now - timedelta(days=1), 7000), (now - timedelta(days=60), 1)]:
         db.execute(text("INSERT INTO download_history (name, source, status, size_bytes, added_at)"
                         " VALUES ('x', 'manual', 'completed', :s, :a)"),
-                   {"s": size, "a": added.astimezone(timezone.utc).replace(tzinfo=None)})
+                   {"s": size, "a": added.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")})
     db.execute(text("INSERT INTO settings (key, value) VALUES ('total_saved_bytes', '1699')"))
     db.commit()
 

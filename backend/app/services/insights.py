@@ -76,7 +76,7 @@ def compute(db: Session, days: int = 30) -> dict:
     dl_by_day: dict[date, list[int]] = defaultdict(lambda: [0, 0])
     for added_at, size in db.execute(text(
             "SELECT added_at, size_bytes FROM download_history WHERE added_at >= :s"),
-            {"s": since_utc.replace(tzinfo=None)}):
+            {"s": since_utc.strftime("%Y-%m-%d %H:%M:%S")}):  # SQLAlchemy's stored DateTime format
         d = _local_day(added_at)
         if d is not None and d >= first_day:
             dl_by_day[d][0] += 1
