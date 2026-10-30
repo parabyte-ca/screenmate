@@ -6,7 +6,7 @@ A self-hosted media pipeline. It finds shows and movies, downloads them through 
 
 ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search, watchlist, downloads) and [FileSplitter](https://github.com/parabyte-ca/filesplitter) (scan, encode, split) into one app with one UI, one login, one database and one container.
 
-> **Status:** Phase 4 (Library). Everything FileSplitter did now has a ScreenMate UI. The **Library** page lets you filter, preview, encode, split, trim, rename, skip and delete files, one at a time or in bulk. **Settings → Media engine** covers media folders, the GPU/CPU encoder, quality, scene detection, splitting, the saved-space counter and the trash. Downloads flow into the library automatically through **Settings → Auto pipeline**. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** Phase 5 (migration). `./setup.sh` installs everything in one go. The setup wizard imports your AuTorrent and FileSplitter databases: watchlist, history, folders, profiles, settings, media library and saved-space total. Next comes the command palette, PWA and push notifications. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 

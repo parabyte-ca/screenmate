@@ -358,6 +358,11 @@ Migration: `ALTER TABLE media_jobs ADD COLUMN journey_id INTEGER`. The `media_jo
 - Settings → Media engine: media folders, GPU status and Recheck, encoder/CRF/preset/resolution, simultaneous jobs (applies live), ffprobe timeout, anthology and split settings, scene detection, TPDB key, saved-space counter, trash.
 - Worker fix: jobs are claimed only when a slot is free (FileSplitter marked every queued job running at once).
 
+# Phase 5: Importer + setup.sh (delivered)
+- Upload autorrent.db and/or filesplitter.db (detected by their tables), preview the counts, then import in one transaction after a backup. IDs are remapped, duplicates skipped, existing settings kept unless you choose to overwrite, and secrets are never imported. FileSplitter paths can be rewritten on the way in.
+- Available as a step in the setup wizard and in Settings → Data management.
+- setup.sh: an interactive or unattended installer (port, time zone, media mounts, GPU, build or pull, upgrade agent) that writes .env and docker-compose.override.yml; update.sh now honours the override.
+
 ## Follow-ups to flag
 - The `anthropic-skills:autorrent` skill will be out of date. Once Phase 3 lands, replace it with a `screenmate` skill (use `skill-creator`).
 - The `homelab` and `plex` skills may refer to the old ports and containers. Review them after migration.

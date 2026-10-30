@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Download, Edit2, FolderOpen, Loader2, Plus, Save, Star, Trash2, Upload } from "lucide-react";
 import { api, type DownloadPath, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
+import ImportPanel from "../components/ImportPanel";
 import MediaSettings from "../components/MediaSettings";
 import PipelineSettings from "../components/PipelineSettings";
 
@@ -1169,6 +1170,13 @@ export default function Settings() {
 
         {/* Data management */}
         <Section title="Data management">
+          <div className="mb-6">
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Import from AuTorrent / FileSplitter</h3>
+            <p className="mt-0.5 mb-3 text-xs text-gray-500 dark:text-gray-400">
+              Merge an old <code>autorrent.db</code> or <code>filesplitter.db</code> into this install. Safe to repeat.
+            </p>
+            <ImportPanel />
+          </div>
           {/* Export */}
           <div className="space-y-3">
             <div>
