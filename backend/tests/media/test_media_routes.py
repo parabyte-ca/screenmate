@@ -185,3 +185,30 @@ def test_saved_bytes_and_gpu_recheck(api, monkeypatch):
     assert api.get("/api/media/stats").json()["total_saved_bytes"] == 42
     monkeypatch.setattr(encoder, "_nvenc_probe_once", lambda: False)
     assert api.post("/api/media/encoder/recheck-gpu").json()["nvenc_available"] is False
+
+
+def test_bulk_queue_skips_busy_and_validates(api, tmp_media_roots):
+    a, _ = _media(tmp_media_roots[0], "a.mkv")
+    b, _ = _media(tmp_media_roots[0], "b.mkv")
+    api.post("/api/media/queue", json={"file_id": b, "job_type": "encode"})
+    r = api.post("/api/media/queue/bulk", json={"file_ids": [a, b, 999], "job_type": "encode",
+                                                "target_resolution": "720p"}).json()
+    assert (r["queued"], r["skipped"]) == (1, 2)
+    assert store.get_job(r["job_ids"][0])["target_resolution"] == "720p"
+    assert store.get_file(a)["status"] == "queued"
+    assert api.post("/api/media/queue/bulk", json={"file_ids": [a], "job_type": "nope"}).status_code == 400
+    assert api.post("/api/media/queue/bulk", json={"file_ids": [], "job_type": "encode"}).status_code == 400
+
+
+def test_bulk_skip_and_delete(api, tmp_media_roots):
+    a, pa = _media(tmp_media_roots[0], "a.mkv")
+    b, pb = _media(tmp_media_roots[0], "b.mkv")
+    c, _ = _media(tmp_media_roots[0], "c.mkv")
+    api.post("/api/media/queue", json={"file_id": c, "job_type": "trim"})
+    assert api.post("/api/media/files/bulk", json={"action": "skip", "file_ids": [a, c]}).json() == \
+        {"ok": True, "done": 1, "skipped": 1, "errors": []}
+    assert store.get_file(a)["status"] == "skipped"
+    r = api.post("/api/media/files/bulk", json={"action": "delete", "file_ids": [a, b]}).json()
+    assert r["done"] == 2 and not os.path.exists(pa) and not os.path.exists(pb)
+    assert api.get("/api/media/trash").json()["file_count"] == 2
+    assert api.post("/api/media/files/bulk", json={"action": "explode", "file_ids": [c]}).status_code == 400

@@ -194,6 +194,59 @@ def queue_job(body: dict = Body(default={})):
     return {"ok": True, "job_id": job_id}
 
 
+@router.post("/queue/bulk")
+def queue_bulk(body: dict = Body(default={})):
+    """Queue the same job for many files (Library bulk bar / "Queue all")."""
+    ids = body.get("file_ids") or []
+    job_type = body.get("job_type")
+    target_resolution = body.get("target_resolution", "original")
+    try:
+        episode_count = int(body.get("episode_count", 0) or 0)
+    except (TypeError, ValueError):
+        return _err("Invalid parameters", 400)
+    if not ids or job_type not in ("encode", "split", "trim"):
+        return _err("Invalid parameters", 400)
+    if target_resolution != "original" and target_resolution not in config.RESOLUTION_MAP:
+        return _err("Invalid parameters", 400)
+    queued, skipped = [], 0
+    for fid in ids:
+        row = db.get_file(int(fid))
+        if row is None or row["status"] in ("queued", "processing") or db.get_active_job_for_file(row["id"]):
+            skipped += 1
+            continue
+        queued.append(db.create_job(row["id"], job_type, target_resolution, episode_count))
+        db.set_file_status(row["id"], "queued")
+    return {"ok": True, "queued": len(queued), "skipped": skipped, "job_ids": queued}
+
+
+@router.post("/files/bulk")
+def files_bulk(body: dict = Body(default={})):
+    """Skip or delete (to .trash) many files; busy files are left alone."""
+    action = body.get("action")
+    ids = body.get("file_ids") or []
+    if action not in ("skip", "delete") or not ids:
+        return _err("Invalid parameters", 400)
+    done, skipped, errors = 0, 0, []
+    for fid in ids:
+        row = db.get_file(int(fid))
+        if row is None or db.get_active_job_for_file(row["id"]) is not None or \
+                row["status"] in ("queued", "processing"):
+            skipped += 1
+            continue
+        if action == "skip":
+            db.set_file_status(row["id"], "skipped")
+        else:
+            if os.path.exists(row["path"]):
+                try:
+                    trash.move_to_trash(row["path"])
+                except OSError as exc:
+                    errors.append(f"{row['filename']}: {exc}")
+                    continue
+            db.delete_file(row["id"])
+        done += 1
+    return {"ok": not errors, "done": done, "skipped": skipped, "errors": errors}
+
+
 @router.post("/queue/pause")
 def pause_queue():
     worker.pause()
