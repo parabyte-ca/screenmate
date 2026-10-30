@@ -15,8 +15,11 @@ node_modules/
 frontend/dist/
 *.tsbuildinfo
 
-# Env
+# Env / per-install settings written by setup.sh
 .env
+docker-compose.override.yml
+docker-compose.override.yml.bak
+upgrade/
 
 # OS
 .DS_Store

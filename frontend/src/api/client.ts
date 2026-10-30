@@ -538,6 +538,21 @@ export interface MediaSettings {
 
 type MediaResult = { ok: boolean; msg?: string };
 
+export interface ImportInspect {
+  filename: string;
+  token?: string;
+  kind?: "autorrent" | "filesplitter";
+  counts?: Record<string, number>;
+  sample_paths?: string[];
+  error?: string;
+}
+
+export interface ImportRunResult {
+  ok: boolean;
+  backup: string | null;
+  results: { token: string; kind: "autorrent" | "filesplitter"; imported: Record<string, number> }[];
+}
+
 export const api = {
   search(q: string, indexer = "all", quality?: string, codec = "x265", filterAdult = true) {
     const p = new URLSearchParams({ q, indexer, codec, filter_adult: String(filterAdult) });
@@ -648,6 +663,18 @@ export const api = {
       req<{ ok: boolean; total_saved_bytes: number }>("/media/settings/saved-bytes", { method: "POST", body: JSON.stringify({ value }) }),
     trash: () => req<{ size_bytes: number; file_count: number }>("/media/trash"),
     emptyTrash: () => req<{ ok: boolean; freed_bytes: number; removed_files: number }>("/media/trash/empty", { method: "POST" }),
+  },
+
+  importer: {
+    inspect: async (files: File[]): Promise<ImportInspect[]> => {
+      const form = new FormData();
+      files.forEach((f) => form.append("files", f));
+      const res = await authedFetch("/import/inspect", { method: "POST", body: form });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "Upload failed");
+      return res.json();
+    },
+    run: (tokens: string[], opts: { overwrite_settings?: boolean; path_rewrite?: { from: string; to: string } } = {}) =>
+      req<ImportRunResult>("/import/run", { method: "POST", body: JSON.stringify({ tokens, ...opts }) }),
   },
 
   pipeline: {

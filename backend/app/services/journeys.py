@@ -214,8 +214,28 @@ def snapshot(db: Session, j: Journey, with_logs: bool = False) -> dict:
 
 # ── Refresh & stats ───────────────────────────────────────────────────────────
 
-def refresh(db: Session, journey_id: int, *, publish: bool = True) -> dict | None:
-    """Recompute the cached status, bump updated_at, commit and broadcast the snapshot."""
+def _latest_time(steps: list[dict]) -> datetime | None:
+    latest = None
+    for s in steps:
+        for key in ("finished_at", "started_at"):
+            raw = s.get(key)
+            if not raw:
+                continue
+            try:
+                t = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            t = t.astimezone(timezone.utc).replace(tzinfo=None) if t.tzinfo else t
+            if latest is None or t > latest:
+                latest = t
+    return latest
+
+
+def refresh(db: Session, journey_id: int, *, publish: bool = True, touch: bool = True) -> dict | None:
+    """Recompute the cached status, bump updated_at, commit and broadcast the snapshot.
+
+    touch=False (backfill/import) dates the journey by its own steps instead of now,
+    so history doesn't all show up as "done today"."""
     j = db.query(Journey).filter(Journey.id == journey_id).first()
     if j is None:
         return None
@@ -229,7 +249,7 @@ def refresh(db: Session, journey_id: int, *, publish: bool = True) -> dict | Non
             publish_stats(db)
         return None
     j.status = _derive_status(steps)
-    j.updated_at = _utcnow()
+    j.updated_at = _utcnow() if touch else (_latest_time(steps) or j.created_at or _utcnow())
     db.commit()
     snap = snapshot(db, j)
     if publish:
@@ -273,17 +293,20 @@ def backfill(db: Session) -> int:
         if dl.id not in linked:
             for_download(db, dl)
             created += 1
+    # Jobs imported from FileSplitter are history: they stay in the Library, not Activity.
+    orphan = "journey_id IS NULL AND (reason IS NULL OR reason != :imported)"
+    imported = {"imported": "Imported from FileSplitter"}
     orphan_files = [r[0] for r in db.execute(text(
-        "SELECT DISTINCT file_id FROM media_jobs WHERE journey_id IS NULL"))]
+        f"SELECT DISTINCT file_id FROM media_jobs WHERE {orphan}"), imported)]
     for file_id in orphan_files:
         j = for_media_file(db, file_id)
-        db.execute(text("UPDATE media_jobs SET journey_id=:j WHERE file_id=:f AND journey_id IS NULL"),
-                   {"j": j.id, "f": file_id})
+        db.execute(text(f"UPDATE media_jobs SET journey_id=:j WHERE file_id=:f AND {orphan}"),
+                   {"j": j.id, "f": file_id, **imported})
         created += 1
     db.commit()
     if created:
         for j in db.query(Journey).all():
-            refresh(db, j.id, publish=False)
+            refresh(db, j.id, publish=False, touch=False)
     return created
 
 

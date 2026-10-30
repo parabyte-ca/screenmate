@@ -6,18 +6,20 @@ services:
     # build: .        # uncomment to build locally instead of pulling from registry
     container_name: screenmate
     ports:
-      - "4260:8000"
+      # Port on this host: SCREENMATE_PORT in .env (setup.sh sets it), default 4260
+      - "${SCREENMATE_PORT:-4260}:8000"
     volumes:
       # Persists the SQLite database across container restarts
       - ./data:/app/data
       # Shared folder for in-app upgrades (must match APP_UPGRADE_FOLDER below)
       - ./upgrade:/upgrade
-      # Media library — ScreenMate scans, encodes and splits files here.
-      # Mount it at the same path qBittorrent saves to, or add a path mapping in Settings.
+      # Media folders are mounted by docker-compose.override.yml (written by setup.sh).
+      # By hand: mount at the same path qBittorrent saves to, or add a path mapping
+      # in Settings → Auto pipeline.
       # - /mnt/nas:/mnt/nas
     environment:
       - DATABASE_URL=sqlite:////app/data/screenmate.db
-      - TZ=America/Toronto
+      - TZ=${TZ:-America/Toronto}
       # In-app upgrade support
       - APP_UPGRADE_FOLDER=/upgrade
       # Set to false to disable automatic daily release checks
@@ -37,10 +39,14 @@ services:
       # - SPLIT_KEYWORDS=Vol,Compilation,Anthology,Collection
       # - FFPROBE_TIMEOUT=60
       # - TPDB_API_KEY=              # optional: online scene naming when splitting
+      # Media folders and encoder from .env (setup.sh writes them; both can also be
+      # changed later in Settings → Media engine).
+      - MEDIA_PATHS=${MEDIA_PATHS:-}
+      - ENCODER_BACKEND=${ENCODER_BACKEND:-cpu}
       # --- NVIDIA GPU (NVENC) encoding ---
-      # Uncomment this and the reservations block below. Requires NVIDIA drivers on
-      # the host + nvidia-container-toolkit. Use CQ 22-24 for quality ~ CRF 28.
-      # - ENCODER_BACKEND=nvenc
+      # setup.sh --gpu adds the device reservation in docker-compose.override.yml.
+      # By hand: set ENCODER_BACKEND=nvenc and uncomment the reservations block below.
+      # Requires NVIDIA drivers on the host + nvidia-container-toolkit.
     # Keep ffmpeg from starving other services on the host.
     deploy:
       resources:

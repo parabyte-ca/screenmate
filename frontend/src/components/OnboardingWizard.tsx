@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertCircle, CheckCircle2, Download, FolderOpen, Loader2 } from "lucide-react";
 import { api, type DownloadPath, type JackettTestResult } from "../api/client";
+import ImportPanel from "./ImportPanel";
 
 const FIELD = [
   "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm",
@@ -10,7 +11,7 @@ const FIELD = [
 ].join(" ");
 const LABEL = "mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300";
 
-const STEPS = ["Welcome", "qBittorrent", "Folder", "Sources", "Done"] as const;
+const STEPS = ["Welcome", "Import", "qBittorrent", "Folder", "Sources", "Done"] as const;
 
 function Result({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
@@ -44,14 +45,16 @@ export default function OnboardingWizard({ onClose }: { onClose: () => void }) {
   const [pUrl, setPUrl] = useState("");
   const [pKey, setPKey] = useState("");
   const [probe, setProbe] = useState<JackettTestResult | null>(null);
+  const [imported, setImported] = useState(false);
 
-  useEffect(() => {
-    api.settings.get().then((s) => {
-      setHost(s.qbit_host || "localhost");
-      setPort(s.qbit_port || "8080");
-      setUser(s.qbit_username || "admin");
-    }).catch(() => {});
-  }, []);
+  const loadSettings = () => api.settings.get().then((s) => {
+    setHost(s.qbit_host || "localhost");
+    setPort(s.qbit_port || "8080");
+    setUser(s.qbit_username || "admin");
+    setPUrl(s.jackett_url || "");
+    setPKey(s.jackett_api_key || "");
+  }).catch(() => {});
+  useEffect(() => { loadSettings(); }, []);
 
   useEffect(() => {
     if (STEPS[step] === "Folder") api.paths.list().then(setPaths).catch(() => {});
@@ -126,14 +129,26 @@ export default function OnboardingWizard({ onClose }: { onClose: () => void }) {
           ))}
         </div>
 
+        {name === "Import" && (
+          <>
+            <h2 id="onb-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">Coming from AuTorrent or FileSplitter?</h2>
+            <p className="mt-1 mb-3 text-sm text-gray-600 dark:text-gray-400">
+              Bring your watchlist, history, folders, settings and media library across. New here? Just skip this step.
+            </p>
+            <ImportPanel onImported={() => { setImported(true); loadSettings(); }} />
+            {imported && <p className="mt-2 text-xs text-gray-500">The next steps are pre-filled from what you imported — just check them.</p>}
+          </>
+        )}
+
         {name === "Welcome" && (
           <>
             <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600"><Download className="h-5 w-5 text-white" /></div>
             <h2 id="onb-title" className="text-xl font-semibold text-gray-900 dark:text-gray-100">Welcome to ScreenMate</h2>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              ScreenMate watches the shows you pick and sends new episodes to qBittorrent automatically. Three quick steps get you going:
+              ScreenMate watches the shows you pick, downloads new episodes through qBittorrent and tidies them into your library. A few quick steps get you going:
             </p>
             <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-gray-700 dark:text-gray-300">
+              <li>Optionally import your AuTorrent / FileSplitter data</li>
               <li>Connect to qBittorrent</li>
               <li>Choose where downloads are saved</li>
               <li>Optionally add more sources (Prowlarr / Jackett)</li>
@@ -248,6 +263,7 @@ export default function OnboardingWizard({ onClose }: { onClose: () => void }) {
           <div className="ml-auto flex gap-2">
             {step > 0 && name !== "Done" && <button onClick={() => setStep((s) => s - 1)} disabled={busy} className={secondary}>Back</button>}
             {name === "Welcome" && <button onClick={next} className={primary}>Get started</button>}
+            {name === "Import" && <button onClick={next} disabled={busy} className={primary}>{imported ? "Next" : "Skip"}</button>}
             {(name === "qBittorrent" || name === "Folder" || name === "Sources") && (
               <button onClick={next} disabled={busy} className={primary}>
                 {name === "Sources" && !(pUrl.trim() && pKey.trim()) ? "Skip" : name === "Folder" && paths.length === 0 ? "Skip" : "Next"}

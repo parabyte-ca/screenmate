@@ -6,7 +6,7 @@ A self-hosted media pipeline. It finds shows and movies, downloads them through 
 
 ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search, watchlist, downloads) and [FileSplitter](https://github.com/parabyte-ca/filesplitter) (scan, encode, split) into one app with one UI, one login, one database and one container.
 
-> **Status:** Phase 4 (Library). Everything FileSplitter did now has a ScreenMate UI. The **Library** page lets you filter, preview, encode, split, trim, rename, skip and delete files, one at a time or in bulk. **Settings → Media engine** covers media folders, the GPU/CPU encoder, quality, scene detection, splitting, the saved-space counter and the trash. Downloads flow into the library automatically through **Settings → Auto pipeline**. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** Phase 5 (migration). `./setup.sh` installs everything in one go. The setup wizard imports your AuTorrent and FileSplitter databases: watchlist, history, folders, profiles, settings, media library and saved-space total. Next comes the command palette, PWA and push notifications. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
@@ -22,17 +22,33 @@ ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search,
 
 ## Quick Start
 
-**Requirements:** Docker and Docker Compose on your server.
+**Requirements:** Docker with the Compose plugin, and git.
 
 ```bash
 git clone https://github.com/parabyte-ca/screenmate.git
 cd screenmate
-docker compose up -d
+./setup.sh
 ```
 
-Open **http://your-server-ip:4260**. Port `4260` was chosen so ScreenMate can run alongside AuTorrent (8180) and FileSplitter (4250) while you migrate. To change it, edit the left-hand side of `"4260:8000"` in `docker-compose.yml`.
+`setup.sh` asks for the port (default 4260), your time zone and your media folders, and spots an NVIDIA GPU if you have one. It then:
+- pulls the image and starts the container
+- waits until the app is healthy
+- offers to install the in-app upgrade helper
+- prints the address to open
 
-For GPU (NVENC) encoding, uncomment `ENCODER_BACKEND=nvenc` and the `reservations` block in `docker-compose.yml`.
+Your answers are saved to `.env` and `docker-compose.override.yml`. Both files stay out of git and are kept by `./update.sh`. Run `./setup.sh` again at any time to change them.
+
+Unattended install:
+
+```bash
+./setup.sh -y --media /mnt/nas/tv --media /mnt/nas/movies --port 4260
+```
+
+Other flags: `--gpu` / `--no-gpu`, `--build` (build from this checkout instead of pulling), `--tz America/Toronto`, `--agent` / `--no-agent`. See `./setup.sh --help`.
+
+Media folders are mounted at the same path inside the container. When qBittorrent runs on the same host, its download paths therefore match without any path mapping.
+
+**Coming from AuTorrent or FileSplitter?** The setup wizard (or **Settings → Data management**) imports your old `autorrent.db` and `filesplitter.db` with one upload each.
 
 ---
 
