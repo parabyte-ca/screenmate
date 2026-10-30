@@ -88,7 +88,7 @@ if [[ -f "$ENV_FILE" ]]; then
         value="${value%\"}"           # strip trailing "
         value="${value#\'}"
         value="${value%\'}"
-        [[ -n "$key" ]] && declare "$key"="$value" 2>/dev/null || true
+        if [[ -n "$key" ]]; then declare "$key"="$value" 2>/dev/null || true; fi
     done < "$ENV_FILE"
 fi
 
