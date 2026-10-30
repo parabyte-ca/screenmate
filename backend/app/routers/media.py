@@ -219,7 +219,10 @@ def start_scan():
 
     def _run():
         try:
-            scanner.scan_all()
+            result = scanner.scan_all()
+            if result and result.get("new_ids"):
+                from ..services import pipeline
+                pipeline.on_scanned(db._engine(), result["new_ids"])
         finally:
             _scan_status["running"] = False
 

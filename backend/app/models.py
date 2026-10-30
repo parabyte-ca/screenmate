@@ -235,6 +235,7 @@ class MediaJob(Base):
     saved_bytes = Column(BigInteger, default=0)
     episode_count = Column(Integer, default=0)
     journey_id = Column(Integer, ForeignKey("journeys.id"), nullable=True, index=True)
+    reason = Column(String, nullable=True)  # why it was queued, e.g. "Rule: Shrink to x265"
 
 
 class Journey(Base):
@@ -256,3 +257,55 @@ class Journey(Base):
     status = Column(String, default="active", index=True)  # active | done | failed | cancelled
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), index=True)
+
+
+# ── Auto pipeline ─────────────────────────────────────────────────────────────
+
+class PipelineRule(Base):
+    """'If a file looks like this, do these steps.' First enabled match wins.
+
+    match   — JSON: source, codecs, min/max_height, min_size_mb, min/max_duration_min,
+              keywords, anthology, path_prefix, watchlist_ids (see services/pipeline.py)
+    actions — JSON list, run in order: {"type": "trim"} | {"type": "encode",
+              "resolution": "original"} | {"type": "split", "episode_count": 0}
+    """
+    __tablename__ = "pipeline_rules"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    enabled = Column(Boolean, default=True, server_default="1")
+    priority = Column(Integer, default=100)
+    match = Column(String, nullable=False, default="{}")
+    actions = Column(String, nullable=False, default="[]")
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class PathMapping(Base):
+    """Translate a path as qBittorrent sees it into the path inside this container."""
+    __tablename__ = "path_mappings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    remote_prefix = Column(String, nullable=False)
+    local_prefix = Column(String, nullable=False)
+
+
+class PipelinePlan(Base):
+    """One file's planned route through a rule's actions, inside a journey."""
+    __tablename__ = "pipeline_plans"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    journey_id = Column(Integer, ForeignKey("journeys.id"), nullable=True, index=True)
+    download_id = Column(Integer, nullable=True, index=True)
+    file_id = Column(Integer, nullable=True, index=True)
+    rule_id = Column(Integer, nullable=True)
+    rule_name = Column(String, nullable=True)
+    actions = Column(String, nullable=False, default="[]")
+    next_index = Column(Integer, default=0)
+    # waiting (for the torrent to leave qBittorrent) | running | done | failed | cancelled
+    status = Column(String, default="waiting", index=True)
+    detail = Column(String, nullable=True)
+    source_path = Column(String, nullable=True)
+    library_status = Column(String, nullable=True)  # done | skipped
+    notify_status = Column(String, nullable=True)   # done | skipped
+    created_at = Column(DateTime, server_default=func.now())
+    finished_at = Column(DateTime, nullable=True)

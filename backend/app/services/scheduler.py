@@ -649,6 +649,16 @@ def _get_digest_schedule() -> tuple[str, int]:
         db.close()
 
 
+def run_pipeline_tick() -> None:
+    """Resume auto-pipeline plans (torrent left qBittorrent, or a restart between steps)."""
+    from . import pipeline
+
+    try:
+        pipeline.tick()
+    except Exception:
+        logger.exception("Pipeline tick failed")
+
+
 def purge_old_trash() -> None:
     """Permanently remove media .trash entries older than 30 days."""
     from .media import trash
@@ -699,6 +709,12 @@ def start_scheduler() -> None:
         daily_update_check,
         trigger=CronTrigger(hour=3, minute=17, timezone="UTC"),
         id="update_check",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        run_pipeline_tick,
+        trigger=IntervalTrigger(minutes=2),
+        id="pipeline_tick",
         replace_existing=True,
     )
     _scheduler.add_job(
