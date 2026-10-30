@@ -428,7 +428,8 @@ def _finalize(bind, plan_id: int) -> None:
             plan.library_status = "done" if has_server else "skipped"
 
             url = settings.get("apprise_url", "")
-            if url:
+            from .webpush import has_subscribers
+            if url or has_subscribers():
                 saved = db.execute(text(
                     "SELECT COALESCE(SUM(saved_bytes),0) FROM media_jobs WHERE file_id=:f AND journey_id=:j"
                 ), {"f": plan.file_id, "j": plan.journey_id}).scalar() or 0
@@ -437,7 +438,7 @@ def _finalize(bind, plan_id: int) -> None:
                 name = row["filename"] if row else "file"
                 body = f"🎬 {name}: {steps} done" + (f", saved {saved / 1e9:.2f} GB" if saved else "")
                 from .apprise_notify import notify
-                notify(url, "ScreenMate — Processing complete", body)
+                notify(url, "ScreenMate — Processing complete", body, url=f"/activity?open={plan.journey_id}")
                 plan.notify_status = "done"
             else:
                 plan.notify_status = "skipped"

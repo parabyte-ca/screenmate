@@ -309,3 +309,17 @@ class PipelinePlan(Base):
     notify_status = Column(String, nullable=True)   # done | skipped
     created_at = Column(DateTime, server_default=func.now())
     finished_at = Column(DateTime, nullable=True)
+
+
+class PushSubscription(Base):
+    """A browser/phone that asked for push notifications (Web Push)."""
+    __tablename__ = "push_subscriptions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    endpoint = Column(String, unique=True, nullable=False)
+    p256dh = Column(String, nullable=False)
+    auth = Column(String, nullable=False)
+    label = Column(String, nullable=True)  # e.g. "Chrome on Android"
+    created_at = Column(DateTime, server_default=func.now())
+    last_success_at = Column(DateTime, nullable=True)
+    failures = Column(Integer, default=0)

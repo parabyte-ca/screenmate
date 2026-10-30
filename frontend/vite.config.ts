@@ -11,13 +11,18 @@ export default defineConfig({
       manifest: {
         name: "ScreenMate",
         short_name: "ScreenMate",
-        description: "Self-hosted torrent auto-downloader",
+        description: "Find, download, encode and organise your media",
         theme_color: "#0f172a",
         background_color: "#0f172a",
         display: "standalone",
-        orientation: "portrait-primary",
+        orientation: "any",
         scope: "/",
         start_url: "/",
+        shortcuts: [
+          { name: "Activity", url: "/activity", icons: [{ src: "/icons/pwa-192x192.png", sizes: "192x192" }] },
+          { name: "Library", url: "/library", icons: [{ src: "/icons/pwa-192x192.png", sizes: "192x192" }] },
+          { name: "Search", url: "/search", icons: [{ src: "/icons/pwa-192x192.png", sizes: "192x192" }] },
+        ],
         icons: [
           {
             src: "/icons/pwa-192x192.png",
@@ -34,17 +39,12 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-        runtimeCaching: [
-          {
-            urlPattern: /^\/api\/.*/i,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "api-cache",
-              expiration: { maxEntries: 50, maxAgeSeconds: 300 },
-              networkTimeoutSeconds: 5,
-            },
-          },
-        ],
+        // Push notification handlers live in public/push-sw.js.
+        importScripts: ["/push-sw.js"],
+        // The SPA shell is served for app routes only — never for the API, the
+        // live event stream or media streams, and API responses aren't cached.
+        navigateFallback: "/index.html",
+        navigateFallbackDenylist: [/^\/api\//, /^\/health/],
       },
       devOptions: {
         enabled: false,

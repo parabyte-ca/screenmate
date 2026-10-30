@@ -8,9 +8,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Command,
   Download,
   Film,
   LogOut,
+  MonitorDown,
   Monitor,
   Moon,
   Search,
@@ -23,6 +25,7 @@ import { authStore } from "../auth";
 import { api } from "../api/client";
 import OnboardingWizard from "./OnboardingWizard";
 import StatusPill from "./StatusPill";
+import CommandPalette from "./CommandPalette";
 
 const nav = [
   { to: "/search",    label: "Search",    icon: Search        },
@@ -61,6 +64,20 @@ export default function Layout() {
   }, []);
 
   const [onboarding, setOnboarding] = useState(false);
+
+  // "Install app" appears when the browser offers it (Chrome/Edge/Android; iOS uses Share → Add to Home Screen).
+  const [installEvt, setInstallEvt] = useState<(Event & { prompt: () => Promise<void> }) | null>(null);
+  useEffect(() => {
+    const onPrompt = (e: Event) => { e.preventDefault(); setInstallEvt(e as Event & { prompt: () => Promise<void> }); };
+    const onInstalled = () => setInstallEvt(null);
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+  const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
   useEffect(() => {
     api.onboarding.status().then((s) => setOnboarding(s.needed)).catch(() => {});
@@ -103,6 +120,7 @@ export default function Layout() {
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
       {onboarding && <OnboardingWizard onClose={() => setOnboarding(false)} />}
+      <CommandPalette />
 
       {/* ── Sidebar (md and above) ──────────────────────────────────────────── */}
       <aside
@@ -138,6 +156,25 @@ export default function Layout() {
         {/* Live status pill */}
         <div className={collapsed ? "pt-3" : "px-3 pt-3"}>
           <StatusPill compact={collapsed} />
+        </div>
+
+        {/* Command palette */}
+        <div className={collapsed ? "pt-2" : "px-3 pt-2"}>
+          <button
+            onClick={() => window.dispatchEvent(new Event("screenmate:palette"))}
+            title={`Search or jump to… (${isMac ? "⌘" : "Ctrl+"}K)`}
+            className={`flex w-full items-center rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400 hover:border-blue-300 dark:hover:border-blue-700 ${
+              collapsed ? "mx-auto h-8 w-8 justify-center" : "gap-2 px-3 py-1.5"
+            }`}
+          >
+            <Command className="h-3.5 w-3.5 shrink-0" />
+            {!collapsed && (
+              <>
+                <span className="flex-1 truncate text-left">Jump to…</span>
+                <kbd className="text-[10px] text-gray-400">{isMac ? "⌘K" : "Ctrl K"}</kbd>
+              </>
+            )}
+          </button>
         </div>
 
         {/* Expand button (collapsed state only) */}
@@ -200,6 +237,15 @@ export default function Layout() {
                 <Icon className="h-3.5 w-3.5" />
               </button>
             ))}
+            {installEvt && (
+              <button
+                title="Install ScreenMate as an app"
+                onClick={async () => { await installEvt.prompt(); setInstallEvt(null); }}
+                className="rounded-md p-1.5 text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-blue-600"
+              >
+                <MonitorDown className="h-3.5 w-3.5" />
+              </button>
+            )}
             {authStore.getToken() && (
               <button
                 title="Sign out"
@@ -220,8 +266,12 @@ export default function Layout() {
       {/* main-scroll: on mobile adds padding to clear the bottom tab bar     */}
       {/* + iOS safe area; on md+ resets to zero (see index.css)              */}
       <main className="flex-1 overflow-y-auto main-scroll">
-        <div className="sticky top-0 z-30 flex justify-center border-b border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/90 px-4 py-2 backdrop-blur md:hidden">
+        <div className="sticky top-0 z-30 flex items-center justify-center gap-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/90 px-4 py-2 backdrop-blur md:hidden">
           <StatusPill />
+          <button aria-label="Search or jump to…" onClick={() => window.dispatchEvent(new Event("screenmate:palette"))}
+                  className="rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-1.5 text-gray-500">
+            <Command className="h-3.5 w-3.5" />
+          </button>
         </div>
         {lowSpace.length > 0 && (
           <div className="flex items-center gap-2 border-b border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-4 py-2 text-xs text-amber-800 dark:text-amber-300">

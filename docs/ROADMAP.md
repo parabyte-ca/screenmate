@@ -363,6 +363,11 @@ Migration: `ALTER TABLE media_jobs ADD COLUMN journey_id INTEGER`. The `media_jo
 - Available as a step in the setup wizard and in Settings → Data management.
 - setup.sh: an interactive or unattended installer (port, time zone, media mounts, GPU, build or pull, upgrade agent) that writes .env and docker-compose.override.yml; update.sh now honours the override.
 
+# Phase 6: Command palette, PWA, push (delivered)
+- Ctrl/⌘+K or "/" opens a palette: pages, actions (scan, pause/resume, clear, theme), torrent search, and live shows/files/activity. "g"+letter jumps to a page.
+- PWA: real manifest with shortcuts, an Install button, and a service worker that no longer serves the SPA shell for /api or caches API responses.
+- Web Push: VAPID keys created automatically, devices managed in Settings → Notifications, and every existing alert also goes to subscribed phones and desktops. Needs HTTPS.
+
 ## Follow-ups to flag
 - The `anthropic-skills:autorrent` skill will be out of date. Once Phase 3 lands, replace it with a `screenmate` skill (use `skill-creator`).
 - The `homelab` and `plex` skills may refer to the old ports and containers. Review them after migration.
