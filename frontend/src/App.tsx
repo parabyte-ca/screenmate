@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "./ThemeContext";
+import { EventsProvider } from "./events";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Search from "./pages/Search";
 import Watchlist from "./pages/Watchlist";
-import Downloads from "./pages/Downloads";
+import Activity from "./pages/Activity";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
 import Updates from "./pages/Updates";
@@ -53,7 +54,9 @@ export default function App() {
           <Route
             element={
               <AuthGuard>
-                <Layout />
+                <EventsProvider>
+                  <Layout />
+                </EventsProvider>
               </AuthGuard>
             }
           >
@@ -62,7 +65,8 @@ export default function App() {
             <Route path="/watchlist" element={<Watchlist />} />
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/browse" element={<Browse />} />
-            <Route path="/downloads" element={<Downloads />} />
+            <Route path="/activity" element={<Activity />} />
+            <Route path="/downloads" element={<Navigate to="/activity" replace />} />
             <Route path="/history" element={<History />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/updates" element={<Updates />} />
