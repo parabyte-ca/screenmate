@@ -97,6 +97,17 @@ def get_all_torrent_statuses() -> dict[str, dict] | None:
         return None
 
 
+def get_content_path(info_hash: str) -> str | None:
+    """Where qBittorrent stored a torrent's data (file or top folder), as qBittorrent sees it."""
+    try:
+        torrents = _get_client().torrents_info(torrent_hashes=info_hash)
+        if torrents:
+            return getattr(torrents[0], "content_path", None) or None
+    except Exception as e:
+        logger.warning("Could not read content path for %s: %s", info_hash, e)
+    return None
+
+
 def remove_torrent(info_hash: str, delete_files: bool = False) -> None:
     """Remove a torrent from qBittorrent, optionally deleting downloaded files."""
     client = _get_client()

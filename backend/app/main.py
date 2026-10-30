@@ -15,7 +15,7 @@ from .middleware.auth import AuthMiddleware
 from .models import Setting
 from .routers import (
     activity, auth, backup, browse, calendar, downloads, events, health, history, media,
-    onboarding, paths, profiles, search, settings, trakt, updates, watchlist,
+    onboarding, paths, pipeline, profiles, search, settings, trakt, updates, watchlist,
 )
 from .services import download_poller, journeys
 from .services import media as media_engine
@@ -88,6 +88,7 @@ app.include_router(onboarding.router, prefix="/api")
 app.include_router(media.router, prefix="/api")
 app.include_router(activity.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
+app.include_router(pipeline.router, prefix="/api")
 
 # Serve compiled React frontend (production)
 if STATIC_DIR.exists():

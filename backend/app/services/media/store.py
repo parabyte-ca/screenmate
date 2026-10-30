@@ -198,15 +198,17 @@ def get_stats() -> dict:
 # --- Jobs ---
 
 def create_job(file_id: int, job_type: str, target_resolution: str = "original",
-               episode_count: int = 0, journey_id: int | None = None) -> int:
+               episode_count: int = 0, journey_id: int | None = None,
+               reason: str | None = None) -> int:
     if journey_id is None:
         journey_id = journeys.on_media_job_created(_engine(), file_id)
     with connect() as conn:
         cur = conn.execute(
             """INSERT INTO media_jobs (file_id, job_type, status, progress_pct, target_resolution,
-               episode_count, saved_bytes, journey_id)
-               VALUES (:f, :t, 'queued', 0, :r, :e, 0, :j)""",
-            {"f": file_id, "t": job_type, "r": target_resolution, "e": episode_count, "j": journey_id},
+               episode_count, saved_bytes, journey_id, reason)
+               VALUES (:f, :t, 'queued', 0, :r, :e, 0, :j, :why)""",
+            {"f": file_id, "t": job_type, "r": target_resolution, "e": episode_count, "j": journey_id,
+             "why": reason},
         )
         job_id = cur.lastrowid
     journeys.on_media_job_changed(_engine(), journey_id)
@@ -342,6 +344,9 @@ def set_job_status(job_id: int, status: str) -> None:
             {"s": status, "now": _now(), "id": job_id},
         )
     journeys.on_media_job_changed(_engine(), _journey_of(job_id))
+    if status in ("done", "error", "cancelled"):
+        from .. import pipeline  # late import: pipeline imports this module
+        pipeline.on_job_finished(_engine(), job_id, status)
 
 
 def dequeue_next_job():

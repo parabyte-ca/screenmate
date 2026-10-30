@@ -25,6 +25,7 @@ def _is_anthology(filename: str, size_bytes: int, duration_sec: float) -> bool:
 def scan_all() -> dict:
     """Scan all configured MEDIA_PATHS and upsert file records. Returns summary."""
     found = skipped = errors = 0
+    new_ids: list[int] = []
 
     for media_path in config.MEDIA_PATHS:
         if not os.path.isdir(media_path):
@@ -64,7 +65,7 @@ def scan_all() -> dict:
                         anthology = bool(existing["anthology_override"])
                     else:
                         anthology = _is_anthology(fname, info.size_bytes, info.duration_sec)
-                    db.upsert_file(
+                    file_id = db.upsert_file(
                         path=full_path,
                         filename=fname,
                         size_bytes=info.size_bytes,
@@ -75,6 +76,8 @@ def scan_all() -> dict:
                         height=info.height,
                     )
                     found += 1
+                    if existing is None:
+                        new_ids.append(file_id)
                     logger.info(
                         "Found: %s | codec=%s | %.0fs | anthology=%s",
                         fname, info.codec, info.duration_sec, anthology,
@@ -84,4 +87,4 @@ def scan_all() -> dict:
                     logger.error("Error scanning %s: %s", full_path, exc)
                     errors += 1
 
-    return {"found": found, "skipped": skipped, "errors": errors}
+    return {"found": found, "skipped": skipped, "errors": errors, "new_ids": new_ids}

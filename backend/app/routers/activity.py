@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Download, Journey, MediaJob, Setting
+from ..models import Download, Journey, MediaJob, PipelinePlan, Setting
 from ..services import journeys
 
 logger = logging.getLogger(__name__)
@@ -70,6 +70,11 @@ def cancel(journey_id: int, db: Session = Depends(get_db)):
     if step["status"] not in ("pending", "running"):
         raise HTTPException(status_code=409, detail=f"{step['label']} is {step['status']}, nothing to cancel")
     ref = step["ref"]
+    if ref["type"] == "plan":
+        from ..services import pipeline
+
+        pipeline.cancel_plan(db.get_bind(), ref["id"])
+        return {"ok": True, "msg": "Remaining steps cancelled"}
     if ref["type"] == "media_job":
         from .media import _cancel_job_by_id
 
@@ -102,6 +107,10 @@ def retry(journey_id: int, db: Session = Depends(get_db)):
     if step["status"] not in ("failed", "cancelled"):
         raise HTTPException(status_code=409, detail=f"{step['label']} is {step['status']}, nothing to retry")
     ref = step["ref"]
+    if ref["type"] == "plan":
+        from ..services import pipeline
+
+        return {"ok": True, "msg": pipeline.retry_plan(db.get_bind(), ref["id"])}
     if ref["type"] == "media_job":
         from ..services.media import store
 
@@ -109,7 +118,7 @@ def retry(journey_id: int, db: Session = Depends(get_db)):
         if store.get_active_job_for_file(job.file_id) is not None:
             raise HTTPException(status_code=409, detail="File already queued or processing")
         new_id = store.create_job(job.file_id, job.job_type, job.target_resolution or "original",
-                                  job.episode_count or 0, journey_id=j.id)
+                                  job.episode_count or 0, journey_id=j.id, reason=job.reason)
         store.set_file_status(job.file_id, "queued")
         return {"ok": True, "msg": f"{step['label']} queued again", "job_id": new_id}
 
@@ -176,6 +185,7 @@ def _delete_journey(db: Session, j: Journey) -> None:
     # Only called for journeys that aren't active, so every job here is finished.
     # Delete rather than unlink them, or startup backfill would resurrect the journey.
     db.query(MediaJob).filter(MediaJob.journey_id == j.id).delete(synchronize_session=False)
+    db.query(PipelinePlan).filter(PipelinePlan.journey_id == j.id).delete(synchronize_session=False)
     if j.download_id:
         dl = db.query(Download).filter(Download.id == j.download_id).first()
         j.download_id = None

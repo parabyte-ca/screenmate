@@ -14,7 +14,7 @@ import logging
 import threading
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import event, func, text
+from sqlalchemy import event, func, inspect, text
 from sqlalchemy.orm import Session
 
 from ..models import Download, Journey, MediaJob, Setting, WatchlistItem
@@ -151,7 +151,7 @@ def _job_steps(db: Session, journey_id: int, with_logs: bool) -> list[dict]:
             "kind": job.job_type, "label": _JOB_LABEL.get(job.job_type, job.job_type.title()),
             "status": status, "progress": round(job.progress_pct or 0, 1),
             "detail": job.log_tail if status != "running" else None,
-            "saved_bytes": job.saved_bytes or 0,
+            "saved_bytes": job.saved_bytes or 0, "reason": job.reason,
             "started_at": job.started_at, "finished_at": job.finished_at,
             "ref": {"type": "media_job", "id": job.id},
         }
@@ -164,15 +164,20 @@ def _job_steps(db: Session, journey_id: int, with_logs: bool) -> list[dict]:
 def _derive_status(steps: list[dict]) -> str:
     if any(s["status"] in ("pending", "running") for s in steps):
         return "active"
-    if not steps:
+    ran = [s for s in steps if s["status"] != "skipped"]
+    if not ran:
         return "done"
-    last = steps[-1]["status"]
+    last = ran[-1]["status"]
     return {"failed": "failed", "cancelled": "cancelled"}.get(last, "done")
 
 
 def _current_index(steps: list[dict]) -> int:
     for i, s in enumerate(steps):
         if s["status"] in ("running", "pending", "failed"):
+            return i
+    # Finished: point at the last step that actually ran (not a skipped tail).
+    for i in range(len(steps) - 1, -1, -1):
+        if steps[i]["status"] != "skipped":
             return i
     return len(steps) - 1
 
@@ -183,7 +188,8 @@ def _steps(db: Session, j: Journey, with_logs: bool = False) -> list[dict]:
         dl = db.query(Download).filter(Download.id == j.download_id).first()
         if dl is not None:
             steps += _download_steps(db, dl)
-    return steps + _job_steps(db, j.id, with_logs)
+    from . import pipeline  # late import: pipeline imports this module
+    return steps + _job_steps(db, j.id, with_logs) + pipeline.plan_steps(db, j.id)
 
 
 def snapshot(db: Session, j: Journey, with_logs: bool = False) -> dict:
@@ -284,6 +290,7 @@ def backfill(db: Session) -> int:
 # ── Hooks ─────────────────────────────────────────────────────────────────────
 
 _PENDING_KEY = "screenmate_journey_downloads"
+_DONE = {"completed", "seeding", "done"}
 
 
 def _after_flush(session: Session, _ctx) -> None:
@@ -294,6 +301,10 @@ def _after_flush(session: Session, _ctx) -> None:
     for obj in session.dirty:
         if isinstance(obj, Download) and session.is_modified(obj, include_collections=False):
             pending.add(("upsert", obj.id))
+            hist = inspect(obj).attrs.status.history
+            if (any(v in _DONE for v in hist.added or ())
+                    and not any(v in _DONE for v in hist.deleted or ())):
+                pending.add(("complete", obj.id))
     for obj in session.deleted:
         if isinstance(obj, Download):
             pending.add(("delete", obj.id))
@@ -304,10 +315,11 @@ def _after_commit(session: Session) -> None:
     if not pending:
         return
     bind = session.get_bind()
+    completed = sorted(dl_id for action, dl_id in pending if action == "complete" and dl_id)
     try:
         with Session(bind=bind) as db:
             for action, dl_id in sorted(pending, key=lambda p: (p[0] == "delete", p[1] or 0)):
-                if dl_id is None:
+                if dl_id is None or action == "complete":
                     continue
                 if action == "delete":
                     j = db.query(Journey).filter(Journey.download_id == dl_id).first()
@@ -326,6 +338,28 @@ def _after_commit(session: Session) -> None:
     except Exception:
         # Journeys are a view; never let them break a download write.
         logger.exception("Journey update after commit failed")
+    for dl_id in completed:
+        _start_pipeline(bind, dl_id)
+
+
+def _start_pipeline(bind, download_id: int) -> None:
+    """Run the auto pipeline for a finished download off the caller's thread (it probes files)."""
+    from . import pipeline
+
+    def run():
+        try:
+            pipeline.on_download_complete(bind, download_id)
+        except Exception:
+            logger.exception("Pipeline failed for download %s", download_id)
+
+    if PIPELINE_SYNC:
+        run()
+    else:
+        threading.Thread(target=run, name=f"pipeline-dl-{download_id}", daemon=True).start()
+
+
+# Tests set this so the pipeline runs inline and deterministically.
+PIPELINE_SYNC = False
 
 
 def _after_rollback(session: Session) -> None:

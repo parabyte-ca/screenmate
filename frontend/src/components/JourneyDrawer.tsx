@@ -131,6 +131,14 @@ export default function JourneyDrawer({ journeyId, onClose, onChanged }: Props) 
                         </Link>
                       </div>
                     )}
+                    {s.reason && (
+                      <p className="mt-0.5 text-xs text-violet-600 dark:text-violet-400">{s.reason}</p>
+                    )}
+                    {s.ref.type === "plan" && s.detail && (
+                      <p className={`mt-0.5 text-xs ${s.status === "failed" ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
+                        {s.detail}
+                      </p>
+                    )}
                     {s.ref.type === "media_job" && s.status !== "running" && s.detail && (
                       <p className={`mt-0.5 text-xs ${s.status === "failed" ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
                         {s.detail}

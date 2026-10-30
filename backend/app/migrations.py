@@ -46,6 +46,7 @@ MIGRATIONS: list[tuple[str, str | None]] = [
         "UPDATE watchlist SET metadata_checked_at = NULL WHERE poster_url IS NULL",
     ),
     ("ALTER TABLE media_jobs ADD COLUMN journey_id INTEGER", None),
+    ("ALTER TABLE media_jobs ADD COLUMN reason TEXT", None),
 ]
 
 
