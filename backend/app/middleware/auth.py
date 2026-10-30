@@ -42,12 +42,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # Password not configured → CF requests also pass through
             return await call_next(request)
 
-        # Require valid Bearer token
+        # Require valid Bearer token. GET requests may pass it as ?token= instead,
+        # because <video src> and EventSource cannot send an Authorization header.
         auth_header = request.headers.get("authorization", "")
-        if not auth_header.startswith("Bearer "):
+        if auth_header.startswith("Bearer "):
+            candidate = auth_header[len("Bearer "):].strip()
+        elif request.method == "GET" and request.query_params.get("token"):
+            candidate = request.query_params["token"]
+        else:
             return JSONResponse({"detail": "Authentication required."}, status_code=401)
 
-        candidate = auth_header[len("Bearer "):].strip()
         secret = rows.get("session_secret", "")
         if not secret:
             return JSONResponse({"detail": "Auth not initialised. Please log in."}, status_code=401)

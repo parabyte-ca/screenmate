@@ -193,3 +193,44 @@ class TraktSeen(Base):
     status = Column(String, nullable=False)
     tvmaze_id = Column(Integer, nullable=True)
     checked_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+# ── Media engine (ported from FileSplitter) ───────────────────────────────────
+# Columns mirror FileSplitter's `files` / `jobs` tables so services/media/store.py
+# can keep its original SQL and the importer can copy rows straight across.
+# Timestamps are ISO-8601 strings, as FileSplitter stored them.
+
+class MediaFile(Base):
+    __tablename__ = "media_files"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    path = Column(String, unique=True, nullable=False)
+    filename = Column(String, nullable=False)
+    size_bytes = Column(BigInteger)
+    duration_sec = Column(Float)
+    codec = Column(String)
+    is_anthology = Column(Integer, default=0)
+    status = Column(String, default="pending", index=True)
+    error_msg = Column(String)
+    discovered_at = Column(String)
+    updated_at = Column(String)
+    width = Column(Integer, default=0)
+    height = Column(Integer, default=0)
+    # NULL = automatic classification; 0/1 = manual override from the UI
+    anthology_override = Column(Integer, nullable=True)
+
+
+class MediaJob(Base):
+    __tablename__ = "media_jobs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("media_files.id"), index=True)
+    job_type = Column(String, nullable=False)  # encode | split | trim
+    status = Column(String, default="queued", index=True)  # queued | running | done | error | cancelled
+    progress_pct = Column(Float, default=0)
+    target_resolution = Column(String, default="original")
+    log_tail = Column(String)
+    started_at = Column(String)
+    finished_at = Column(String)
+    saved_bytes = Column(BigInteger, default=0)
+    episode_count = Column(Integer, default=0)
