@@ -1,0 +1,362 @@
+import asyncio
+import logging
+import threading
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from ..database import get_db
+from ..models import Download, DownloadHistory, DownloadPath, Setting
+from ..schemas import DownloadCreate, DuplicateCheckRequest
+from ..services.duplicate import check_duplicate
+from ..services.media_servers import trigger_media_refresh
+from ..services.qbit_states import DOWNLOADING_STATES, ERROR_STATES, QBITTORRENT_COMPLETE_STATES
+from ..services.qbittorrent import _hash_from_magnet, add_torrent, get_all_torrent_statuses, remove_torrent
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+# Seconds to wait after first seeing a complete state before removing the
+# torrent from qBittorrent.  Hardcoded — not user-configurable.
+_GRACE_PERIOD = timedelta(seconds=60)
+
+
+def _grace_elapsed(first_seen: datetime | None) -> bool:
+    """True once the post-completion grace period has passed.
+
+    SQLite hands datetimes back naive (they are stored as UTC), so make the
+    value timezone-aware before comparing it with now.
+    """
+    if first_seen is None:
+        return False
+    if first_seen.tzinfo is None:
+        first_seen = first_seen.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - first_seen >= _GRACE_PERIOD
+
+
+def _fire_media_refresh(settings_dict: dict) -> None:
+    """Spawn a daemon thread to run the media refresh without blocking the response."""
+    def _run():
+        try:
+            asyncio.run(trigger_media_refresh(settings_dict))
+        except Exception as e:
+            logger.error("Media refresh thread error: %s", e)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _update_history_completed(db: Session, torrent_hash: str, size_bytes: int | None) -> None:
+    """Mark the most recent matching history row as completed."""
+    try:
+        hist = (
+            db.query(DownloadHistory)
+            .filter(
+                DownloadHistory.torrent_hash == torrent_hash,
+                DownloadHistory.status == "downloading",
+            )
+            .order_by(DownloadHistory.added_at.desc())
+            .first()
+        )
+        if hist:
+            hist.status = "completed"
+            hist.completed_at = datetime.now(timezone.utc)
+            if hist.size_bytes is None and size_bytes:
+                hist.size_bytes = size_bytes
+    except Exception as e:
+        logger.error("Failed to update history on completion: %s", e)
+
+
+def _update_history_failed(db: Session, torrent_hash: str, error_msg: str) -> None:
+    """Mark the most recent matching history row as failed."""
+    try:
+        hist = (
+            db.query(DownloadHistory)
+            .filter(
+                DownloadHistory.torrent_hash == torrent_hash,
+                DownloadHistory.status == "downloading",
+            )
+            .order_by(DownloadHistory.added_at.desc())
+            .first()
+        )
+        if hist:
+            hist.status = "failed"
+            hist.error_msg = error_msg
+    except Exception as e:
+        logger.error("Failed to update history on failure: %s", e)
+
+
+@router.get("/downloads")
+def get_downloads(db: Session = Depends(get_db)):
+    downloads = db.query(Download).order_by(Download.created_at.desc()).all()
+    result = []
+
+    stall_row = db.query(Setting).filter(Setting.key == "stall_hours").first()
+    try:
+        stale_threshold = timedelta(hours=max(int(stall_row.value), 1)) if stall_row and stall_row.value else timedelta(hours=2)
+    except ValueError:
+        stale_threshold = timedelta(hours=2)
+
+    # Fetch ALL torrent statuses in a single qBittorrent API call.
+    # Returns None if qBittorrent is unreachable (we skip status updates in that case).
+    # Returns {} if qBittorrent is reachable but has no torrents.
+    # A hash absent from the dict means that specific torrent was removed from qBittorrent.
+    needs_qbit = any(
+        d.torrent_hash and not d.qbit_removed and d.status not in ("error", "done")
+        for d in downloads
+    )
+    all_statuses: dict[str, dict] | None = get_all_torrent_statuses() if needs_qbit else {}
+    qbit_up = all_statuses is not None
+
+    _settings_cache: dict | None = None
+
+    for d in downloads:
+        now = datetime.now(timezone.utc)
+
+        # Stale = no download progress for the configured stall window.  The event
+        # sweep records last_progress_at; before it has seen a torrent we fall
+        # back to the age of the download.
+        ref = d.last_progress_at or d.created_at
+        if ref is not None and ref.tzinfo is None:
+            ref = ref.replace(tzinfo=timezone.utc)
+        is_stale = d.status == "downloading" and ref is not None and (now - ref) >= stale_threshold
+
+        item = {
+            "id": d.id,
+            "title": d.title,
+            "torrent_hash": d.torrent_hash,
+            "size_bytes": d.size_bytes,
+            "status": d.status,
+            "download_path": d.download_path,
+            "watchlist_id": d.watchlist_id,
+            "created_at": d.created_at.isoformat() if d.created_at else None,
+            "progress": None,
+            "eta": None,
+            "dlspeed": None,
+            "is_stale": is_stale,
+        }
+
+        skip_qbit = (
+            not d.torrent_hash
+            or d.qbit_removed
+            or d.status in ("error", "done")
+            or not qbit_up
+        )
+
+        if not skip_qbit:
+            try:
+                # all_statuses is a dict here (qbit_up is True)
+                qs = all_statuses.get(d.torrent_hash)  # type: ignore[union-attr]
+
+                if qs is None:
+                    # qBittorrent is reachable but this torrent is gone from it.
+                    # It was removed (by qBit's own remove-on-complete, by ScreenMate's
+                    # scheduler, or manually) before the Downloads page saw its
+                    # finished state.  Mark it done so it stops showing as Downloading.
+                    if d.status == "downloading":
+                        d.status = "completed"
+                        item["status"] = "completed"
+                        d.qbit_removed = True
+                        if d.completion_first_seen_at is None:
+                            d.completion_first_seen_at = datetime.now(timezone.utc)
+                        _update_history_completed(db, d.torrent_hash, d.size_bytes)
+                        logger.info(
+                            "Torrent '%s' (%s) gone from qBittorrent while still"
+                            " 'downloading' — marking completed.",
+                            d.title, d.torrent_hash,
+                        )
+                        db.commit()
+                    elif d.status == "completed" and _grace_elapsed(d.completion_first_seen_at):
+                        d.qbit_removed = True
+                        logger.info(
+                            "Torrent '%s' (%s) absent from qBittorrent — marking removed.",
+                            d.title, d.torrent_hash,
+                        )
+                        db.commit()
+                else:
+                    item["progress"] = qs.get("progress")
+                    item["eta"] = qs.get("eta")
+                    item["dlspeed"] = qs.get("dlspeed")
+                    if d.size_bytes is None and qs.get("size"):
+                        d.size_bytes = qs["size"]
+
+                    qstate = qs.get("status", "")
+
+                    if qstate in QBITTORRENT_COMPLETE_STATES:
+                        # Mark completed on first detection.
+                        if d.status != "completed":
+                            d.status = "completed"
+                            item["status"] = "completed"
+                            _update_history_completed(db, d.torrent_hash, d.size_bytes)
+
+                        # Start grace-period clock once out of "moving".
+                        if d.completion_first_seen_at is None and qstate != "moving":
+                            d.completion_first_seen_at = datetime.now(timezone.utc)
+
+                        db.commit()
+
+                        # After grace period: fire hooks then remove from qBittorrent.
+                        if not d.qbit_removed and _grace_elapsed(d.completion_first_seen_at):
+
+                            # 1. Plex / Jellyfin library refresh
+                            if _settings_cache is None:
+                                _settings_cache = {s.key: s.value for s in db.query(Setting).all()}
+                            _fire_media_refresh(_settings_cache)
+
+                            # 2. Remove from qBittorrent (files are always kept)
+                            try:
+                                remove_torrent(d.torrent_hash, delete_files=False)
+                                d.qbit_removed = True
+                                db.commit()
+                                logger.info(
+                                    "Removed completed torrent '%s' (%s) from qBittorrent"
+                                    " after grace period.",
+                                    d.title, d.torrent_hash,
+                                )
+                            except Exception as del_err:
+                                logger.warning(
+                                    "Failed to remove torrent '%s' (%s) from qBittorrent"
+                                    " — will retry: %s",
+                                    d.title, d.torrent_hash, del_err,
+                                )
+
+                    elif qstate in DOWNLOADING_STATES:
+                        d.status = "downloading"
+                        item["status"] = "downloading"
+                        db.commit()
+
+                    elif qstate in ERROR_STATES:
+                        prev_status = d.status
+                        d.status = "error"
+                        item["status"] = "error"
+                        if prev_status != "error":
+                            _update_history_failed(db, d.torrent_hash, qstate)
+                        db.commit()
+
+            except Exception as e:
+                logger.warning("Error updating status for download %d ('%s'): %s", d.id, d.title, e)
+
+        result.append(item)
+
+    return result
+
+
+@router.post("/downloads/check-duplicate")
+def check_duplicate_endpoint(payload: DuplicateCheckRequest, db: Session = Depends(get_db)):
+    """Check whether a torrent appears to have been downloaded before.
+
+    Always returns HTTP 200 — callers interpret the ``is_duplicate`` field.
+    """
+    return check_duplicate(
+        torrent_hash=payload.torrent_hash,
+        torrent_name=payload.torrent_name,
+        db=db,
+    )
+
+
+@router.post("/downloads", status_code=201)
+def add_download(payload: DownloadCreate, db: Session = Depends(get_db)):
+    dp = None
+    save_path = "/downloads"
+
+    if payload.download_path_id:
+        dp = db.query(DownloadPath).filter(DownloadPath.id == payload.download_path_id).first()
+        if dp:
+            save_path = dp.path
+    else:
+        dp = db.query(DownloadPath).filter(DownloadPath.is_default == True).first()
+        if dp:
+            save_path = dp.path
+
+    settings = {s.key: s.value for s in db.query(Setting).all()}
+    category = settings.get("qbit_category", "screenmate")
+
+    # Duplicate detection — derive hash from the magnet link.
+    torrent_hash = _hash_from_magnet(payload.magnet)
+    dup = check_duplicate(torrent_hash=torrent_hash, torrent_name=payload.title, db=db)
+
+    if dup["is_duplicate"] and not payload.force:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "duplicate": True,
+                "match_type": dup["match_type"],
+                "matched_name": dup["matched_name"],
+                "matched_at": dup["matched_at"],
+                "message": "This torrent appears to have already been downloaded.",
+            },
+        )
+    if dup["is_duplicate"] and payload.force:
+        logger.info(
+            "Duplicate override: adding '%s' despite existing match (%s).",
+            payload.title, dup["match_type"],
+        )
+
+    try:
+        info_hash = add_torrent(payload.magnet, save_path, category)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to add torrent: {e}")
+
+    download = Download(
+        title=payload.title,
+        torrent_hash=info_hash,
+        magnet_link=payload.magnet,
+        status="downloading",
+        download_path=save_path,
+        watchlist_id=payload.watchlist_id,
+    )
+    db.add(download)
+    db.commit()
+    db.refresh(download)
+
+    # Write history record immediately after the torrent is accepted by
+    # qBittorrent.  Failures here must never block or fail the download itself.
+    try:
+        hist = DownloadHistory(
+            name=payload.title,
+            source="manual",
+            indexer=payload.indexer,
+            folder=dp.name if dp else None,
+            torrent_hash=info_hash,
+            size_bytes=None,  # not known at add time; filled in on completion
+            status="downloading",
+            watchlist_id=payload.watchlist_id,
+        )
+        db.add(hist)
+        db.commit()
+    except Exception as e:
+        logger.error("Failed to write download history: %s", e)
+
+    return {
+        "id": download.id,
+        "title": download.title,
+        "torrent_hash": download.torrent_hash,
+        "status": download.status,
+        "download_path": download.download_path,
+        "created_at": download.created_at.isoformat() if download.created_at else None,
+    }
+
+
+@router.delete("/downloads")
+def clear_finished_downloads(db: Session = Depends(get_db)):
+    _IN_PROGRESS = {"downloading", "adding"}
+    to_delete = (
+        db.query(Download)
+        .filter(~Download.status.in_(_IN_PROGRESS))
+        .all()
+    )
+    count = len(to_delete)
+    for d in to_delete:
+        db.delete(d)
+    db.commit()
+    return {"ok": True, "deleted": count}
+
+
+@router.delete("/downloads/{download_id}")
+def delete_download(download_id: int, db: Session = Depends(get_db)):
+    download = db.query(Download).filter(Download.id == download_id).first()
+    if not download:
+        raise HTTPException(status_code=404, detail="Download not found")
+    db.delete(download)
+    db.commit()
+    return {"ok": True}

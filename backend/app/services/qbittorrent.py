@@ -1,0 +1,114 @@
+import logging
+import re
+import urllib.parse
+
+import qbittorrentapi
+
+from ..database import SessionLocal
+from ..models import Setting
+from .torrent_meta import url_to_magnet
+
+logger = logging.getLogger(__name__)
+
+
+def _get_settings() -> dict[str, str]:
+    db = SessionLocal()
+    try:
+        return {s.key: s.value for s in db.query(Setting).all()}
+    finally:
+        db.close()
+
+
+def _get_client() -> qbittorrentapi.Client:
+    s = _get_settings()
+    host = s.get("qbit_host", "localhost")
+    port = int(s.get("qbit_port", "8080"))
+    username = s.get("qbit_username", "admin")
+    logger.debug("Connecting to qBittorrent at %s:%s as %s", host, port, username)
+    client = qbittorrentapi.Client(
+        host=host,
+        port=port,
+        username=username,
+        password=s.get("qbit_password", ""),
+    )
+    try:
+        client.auth_log_in()
+    except qbittorrentapi.LoginFailed:
+        # qBittorrent 5.x returns HTTP 204 (empty body) on successful login.
+        # Older library versions expect "Ok." in the body and raise LoginFailed
+        # even though the session cookie was set correctly. Verify by making a
+        # real API call — if that succeeds the connection is fine.
+        client.app_version()
+    return client
+
+
+def _hash_from_magnet(magnet: str) -> str | None:
+    match = re.search(r"btih:([a-fA-F0-9]{40,64})", magnet, re.IGNORECASE)
+    return match.group(1).lower() if match else None
+
+
+def add_torrent(magnet: str, save_path: str, category: str | None = None) -> str | None:
+    # Indexer proxies may hand us a .torrent URL; resolve it to a magnet first so
+    # the info-hash is known for duplicate detection and status tracking.
+    if magnet.lower().startswith(("http://", "https://")):
+        magnet, _ = url_to_magnet(magnet)
+    client = _get_client()
+    kwargs: dict = {"urls": magnet, "save_path": save_path}
+    if category:
+        kwargs["category"] = category
+    client.torrents_add(**kwargs)
+    return _hash_from_magnet(magnet)
+
+
+def _torrent_to_dict(t) -> dict:
+    return {
+        "status": t.state,
+        "progress": round(t.progress, 4),
+        "size": t.size,
+        "dlspeed": t.dlspeed,
+        "eta": t.eta,
+    }
+
+
+def get_torrent_status(info_hash: str) -> dict | None:
+    try:
+        client = _get_client()
+        torrents = client.torrents_info(torrent_hashes=info_hash)
+        if torrents:
+            return _torrent_to_dict(torrents[0])
+    except Exception:
+        pass
+    return None
+
+
+def get_all_torrent_statuses() -> dict[str, dict] | None:
+    """Fetch every torrent's status in one API call.
+
+    Returns a dict mapping lowercase info_hash -> status dict, or None
+    if qBittorrent is unreachable.  Callers can safely treat a hash
+    that is absent from the returned dict as "removed from qBittorrent"
+    (distinct from None which means "could not connect at all").
+    """
+    try:
+        client = _get_client()
+        return {t.hash.lower(): _torrent_to_dict(t) for t in client.torrents_info()}
+    except Exception as e:
+        logger.warning("Failed to fetch all torrent statuses: %s", e)
+        return None
+
+
+def remove_torrent(info_hash: str, delete_files: bool = False) -> None:
+    """Remove a torrent from qBittorrent, optionally deleting downloaded files."""
+    client = _get_client()
+    client.torrents_delete(delete_files=delete_files, torrent_hashes=info_hash)
+
+
+def test_connection() -> tuple[bool, str]:
+    try:
+        client = _get_client()
+        version = client.app_version()
+        return True, f"Connected to qBittorrent {version}"
+    except Exception as e:
+        msg = str(e) or type(e).__name__
+        logger.error("qBittorrent connection failed: %s: %s", type(e).__name__, msg)
+        return False, f"{type(e).__name__}: {msg}" if str(e) else type(e).__name__

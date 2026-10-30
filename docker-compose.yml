@@ -1,0 +1,51 @@
+services:
+  screenmate:
+    # update.sh pins SCREENMATE_VERSION (in .env) to the release it installs, so a
+    # bad release can be rolled back to the exact previous image. Unset = latest.
+    image: ghcr.io/parabyte-ca/screenmate:${SCREENMATE_VERSION:-latest}
+    # build: .        # uncomment to build locally instead of pulling from registry
+    container_name: screenmate
+    ports:
+      - "4260:8000"
+    volumes:
+      # Persists the SQLite database across container restarts
+      - ./data:/app/data
+      # Shared folder for in-app upgrades (must match APP_UPGRADE_FOLDER below)
+      - ./upgrade:/upgrade
+      # Media library — ScreenMate scans, encodes and splits files here.
+      # Mount it at the same path qBittorrent saves to, or add a path mapping in Settings.
+      # - /mnt/nas:/mnt/nas
+    environment:
+      - DATABASE_URL=sqlite:////app/data/screenmate.db
+      - TZ=America/Toronto
+      # In-app upgrade support
+      - APP_UPGRADE_FOLDER=/upgrade
+      # Set to false to disable automatic daily release checks
+      # - APP_UPDATE_CHECK=true
+      # --- NVIDIA GPU (NVENC) encoding ---
+      # Uncomment this and the reservations block below. Requires NVIDIA drivers on
+      # the host + nvidia-container-toolkit. Use CQ 22-24 for quality ~ CRF 28.
+      # - ENCODER_BACKEND=nvenc
+    # Keep ffmpeg from starving other services on the host.
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: "4G"
+        # reservations:
+        #   devices:
+        #     - driver: nvidia
+        #       count: 1
+        #       capabilities: [gpu, video]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
