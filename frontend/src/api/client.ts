@@ -558,6 +558,21 @@ export interface PushConfig {
   devices: { id: number; label: string | null; created_at: string | null }[];
 }
 
+export interface Insights {
+  days: number;
+  totals: {
+    saved_bytes: number; saved_bytes_period: number; encodes_period: number; downloads_period: number;
+    downloaded_bytes_period: number; library_files: number; library_bytes: number; hevc_share: number;
+  };
+  savings_by_day: { date: string; saved_bytes: number; encodes: number }[];
+  downloads_by_day: { date: string; count: number; bytes: number }[];
+  codec_mix: { codec: string; label: string; files: number; bytes: number }[];
+  resolution_mix: { label: string; files: number; bytes: number }[];
+  speed: { encoder: string; label: string; jobs: number; realtime_x: number }[];
+  forecast: { files: number; bytes: number; est_saved_bytes: number; ratio: number; encoder: string; est_hours: number | null };
+  top_savings: { filename: string; saved_bytes: number; after_bytes: number | null; finished_at: string | null }[];
+}
+
 export const api = {
   search(q: string, indexer = "all", quality?: string, codec = "x265", filterAdult = true) {
     const p = new URLSearchParams({ q, indexer, codec, filter_adult: String(filterAdult) });
@@ -669,6 +684,8 @@ export const api = {
     trash: () => req<{ size_bytes: number; file_count: number }>("/media/trash"),
     emptyTrash: () => req<{ ok: boolean; freed_bytes: number; removed_files: number }>("/media/trash/empty", { method: "POST" }),
   },
+
+  insights: (days = 30) => req<Insights>(`/insights?days=${days}`),
 
   push: {
     config: () => req<PushConfig>("/push/config"),

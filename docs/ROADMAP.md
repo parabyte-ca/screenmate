@@ -368,6 +368,12 @@ Migration: `ALTER TABLE media_jobs ADD COLUMN journey_id INTEGER`. The `media_jo
 - PWA: real manifest with shortcuts, an Install button, and a service worker that no longer serves the SPA shell for /api or caches API responses.
 - Web Push: VAPID keys created automatically, devices managed in Settings → Notifications, and every existing alert also goes to subscribed phones and desktops. Needs HTTPS.
 
+# Phase 7: Insights (delivered)
+- Insights page (`/insights`, `g i`): all-time space saved, then figures for the last 7, 30 or 90 days: saved per day, downloads per day, library by codec and by resolution, encoding speed per encoder (× real time), and the biggest wins.
+- "What's left to gain": how much the files that aren't HEVC yet would save, at your own past ratio, and how long that would take on the current encoder. It links to the Library and the Auto pipeline.
+- Everything is worked out from existing tables (no separate ledger to drift). Encodes now record which encoder ran them and how many seconds of video they covered.
+- Click any poster for a larger preview.
+
 ## Follow-ups to flag
 - The `anthropic-skills:autorrent` skill will be out of date. Once Phase 3 lands, replace it with a `screenmate` skill (use `skill-creator`).
 - The `homelab` and `plex` skills may refer to the old ports and containers. Review them after migration.

@@ -4,6 +4,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Loader2, RotateCcw, Search, S
 import { api, type Journey, type ProgressEvent } from "../api/client";
 import { useEvent } from "../events";
 import { fmtDate, fmtSize } from "../utils";
+import Poster from "./Poster";
 import {
   applyProgress, fmtDuration, fmtEta, fmtSpeed, ProgressBar, STATUS_STYLE, StatusIcon, StepIcon,
 } from "./journey";
@@ -66,7 +67,7 @@ export default function JourneyDrawer({ journeyId, onClose, onChanged }: Props) 
       <button className="absolute inset-0 bg-black/30" aria-label="Close" onClick={onClose} />
       <aside className="relative flex h-full w-full max-w-md flex-col bg-white dark:bg-gray-900 shadow-xl">
         <header className="flex items-start gap-3 border-b border-gray-200 dark:border-gray-700 p-4">
-          {j?.poster_url && <img src={j.poster_url} alt="" className="h-16 w-11 shrink-0 rounded object-cover" />}
+          {j?.poster_url && <Poster url={j.poster_url} title={j.title} className="h-16 w-11" />}
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 break-words">{j?.title ?? "…"}</h2>
             {j && (

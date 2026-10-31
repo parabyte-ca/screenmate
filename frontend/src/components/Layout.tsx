@@ -18,6 +18,7 @@ import {
   Search,
   Settings,
   Sun,
+  TrendingUp,
   Tv,
 } from "lucide-react";
 import { useTheme, type Theme } from "../ThemeContext";
@@ -28,14 +29,16 @@ import StatusPill from "./StatusPill";
 import CommandPalette from "./CommandPalette";
 
 const nav = [
-  { to: "/search",    label: "Search",    icon: Search        },
-  { to: "/watchlist", label: "Watchlist", icon: Tv            },
-  { to: "/calendar",  label: "Calendar",  icon: CalendarDays  },
-  { to: "/activity",  label: "Activity",  icon: Activity      },
-  { to: "/library",   label: "Library",   icon: Film          },
-  { to: "/history",   label: "History",   icon: Clock         },
-  { to: "/settings",  label: "Settings",  icon: Settings      },
-  { to: "/updates",   label: "Updates",   icon: ArrowUpCircle },
+  // mobile: shown in the bottom bar; the rest are a tap away via the palette button.
+  { to: "/search",    label: "Search",    icon: Search,        mobile: true  },
+  { to: "/watchlist", label: "Watchlist", icon: Tv,            mobile: true  },
+  { to: "/calendar",  label: "Calendar",  icon: CalendarDays,  mobile: false },
+  { to: "/activity",  label: "Activity",  icon: Activity,      mobile: true  },
+  { to: "/library",   label: "Library",   icon: Film,          mobile: true  },
+  { to: "/insights",  label: "Insights",  icon: TrendingUp,    mobile: true  },
+  { to: "/history",   label: "History",   icon: Clock,         mobile: false },
+  { to: "/settings",  label: "Settings",  icon: Settings,      mobile: true  },
+  { to: "/updates",   label: "Updates",   icon: ArrowUpCircle, mobile: false },
 ];
 
 const themeButtons: { value: Theme; icon: typeof Sun; title: string }[] = [
@@ -290,7 +293,7 @@ export default function Layout() {
         className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-[0_-1px_3px_rgba(0,0,0,0.08)]"
         style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" } as React.CSSProperties}
       >
-        {nav.map(({ to, label, icon: Icon }) => (
+        {nav.filter((n) => n.mobile).map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
