@@ -223,12 +223,26 @@ export default function Updates() {
           <div className="flex-1 min-w-0">
             {status?.helper.connected ? (
               <p className="text-sm text-green-700 dark:text-green-400 font-medium">
-                Connected (heartbeat every {status.helper.every_minutes} min)
+                {status.helper.busy
+                  ? "Connected — busy running an upgrade"
+                  : `Connected (heartbeat every ${status.helper.every_minutes} min)`}
               </p>
             ) : status?.helper.configured ? (
-              <p className="text-sm text-orange-600 dark:text-orange-400 font-medium">
-                Helper installed but not reporting — check cron
-              </p>
+              <>
+                <p className="text-sm text-orange-600 dark:text-orange-400 font-medium">
+                  Helper installed but not reporting
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  It runs from cron on the host every {status.helper.every_minutes} minutes. On the host, check it's
+                  still scheduled, then run it once by hand; its last lines say what's wrong:
+                </p>
+                <code className="mt-2 block whitespace-pre-wrap rounded bg-gray-100 dark:bg-gray-800 px-3 py-2 text-xs font-mono text-gray-800 dark:text-gray-200 break-all">
+                  {"sudo bash scripts/upgrade-agent.sh --print\nsudo bash scripts/upgrade-agent.sh\nsudo tail -20 /var/log/upgrade-agent.log"}
+                </code>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  If the schedule is missing, reinstall it with <code>sudo bash scripts/upgrade-agent.sh --install</code>.
+                </p>
+              </>
             ) : (
               <>
                 <p className="text-sm text-gray-700 dark:text-gray-300 font-medium">Not installed</p>

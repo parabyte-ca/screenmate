@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Download, DownloadHistory, DownloadPath, Setting
+from ..models import Download, DownloadHistory, Setting
 from ..schemas import DownloadCreate, DuplicateCheckRequest
 from ..services.duplicate import check_duplicate
 from ..services.media_servers import trigger_media_refresh
@@ -257,16 +257,9 @@ def check_duplicate_endpoint(payload: DuplicateCheckRequest, db: Session = Depen
 @router.post("/downloads", status_code=201)
 def add_download(payload: DownloadCreate, db: Session = Depends(get_db)):
     dp = None
-    save_path = "/downloads"
-
-    if payload.download_path_id:
-        dp = db.query(DownloadPath).filter(DownloadPath.id == payload.download_path_id).first()
-        if dp:
-            save_path = dp.path
-    else:
-        dp = db.query(DownloadPath).filter(DownloadPath.is_default == True).first()
-        if dp:
-            save_path = dp.path
+    from ..services.folders import download_folder
+    dp = download_folder(db, payload.download_path_id)
+    save_path = dp.path if dp else "/downloads"
 
     settings = {s.key: s.value for s in db.query(Setting).all()}
     category = settings.get("qbit_category", "screenmate")

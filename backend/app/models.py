@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, BigInteger, UniqueConstraint
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -130,12 +130,23 @@ class Download(Base):
 
 
 class DownloadPath(Base):
+    """A folder ScreenMate knows about. One list serves both halves of the app:
+
+    * ``downloads``: qBittorrent may save into it; ``path`` is that folder as
+      qBittorrent sees it.
+    * ``scan``: the media engine scans, encodes, splits and trims files in it,
+      at ``local_path`` (or, when that is empty, ``path`` translated by the path
+      mappings). A library-only folder has downloads off and path == local_path.
+    """
     __tablename__ = "download_paths"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     path = Column(String, nullable=False)
     is_default = Column(Boolean, default=False)
+    local_path = Column(String, nullable=True)
+    downloads = Column(Boolean, nullable=False, default=True, server_default=text("1"))
+    scan = Column(Boolean, nullable=False, default=True, server_default=text("1"))
 
 
 class Setting(Base):

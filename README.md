@@ -48,6 +48,8 @@ Other flags: `--gpu` / `--no-gpu`, `--build` (build from this checkout instead o
 
 Media folders are mounted at the same path inside the container. When qBittorrent runs on the same host, its download paths therefore match without any path mapping.
 
+**Folders** (in Settings) is one list for both halves of the app. Each folder can take downloads, be scanned and encoded, or both. The folders you give `setup.sh --media` appear there automatically. A folder qBittorrent sees under a different path (another container, another machine) is linked by a path mapping or its "Path here" field. When you upgrade from an earlier version, the old download folders and media folders are merged into this list automatically, and nothing that was scanned before stops being scanned.
+
 **Coming from AuTorrent or FileSplitter?** The setup wizard (or **Settings → Data management**) imports your old `autorrent.db` and `filesplitter.db` with one upload each.
 
 ---

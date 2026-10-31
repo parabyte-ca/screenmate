@@ -646,7 +646,7 @@ export default function Watchlist() {
       const [w, p, pr, st] = await Promise.all([
         api.watchlist.list(), api.paths.list(), api.profiles.list(), api.settings.get(),
       ]);
-      setItems(w); setPaths(p); setProfiles(pr);
+      setItems(w); setPaths(p.filter((x) => x.downloads !== false)); setProfiles(pr);  // only folders downloads can go to
       setDefaultProfileId(st.default_profile_id ? Number(st.default_profile_id) : null);
     } finally { setLoading(false); }
   };

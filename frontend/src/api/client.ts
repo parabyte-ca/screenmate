@@ -140,9 +140,27 @@ export interface DownloadPath {
   name: string;
   path: string;
   is_default: boolean;
+  /** Path here when it differs and no path mapping covers it; null = worked out. */
+  local_path?: string | null;
+  /** Where ScreenMate sees the folder (local_path or the mapped path). */
+  local?: string;
+  exists_here?: boolean;
+  /** qBittorrent may save here. */
+  downloads?: boolean;
+  /** The Library scans and encodes here. */
+  scan?: boolean;
   free_bytes?: number | null;
   total_bytes?: number | null;
   low_space?: boolean;
+}
+
+export interface FolderInput {
+  name: string;
+  path: string;
+  is_default: boolean;
+  local_path?: string | null;
+  downloads?: boolean;
+  scan?: boolean;
 }
 
 export type Settings = Record<string, string>;
@@ -325,6 +343,8 @@ export interface HelperInfo {
   connected: boolean;
   last_seen: string | null;
   every_minutes: number;
+  /** An earlier run is still working (an upgrade in progress). */
+  busy?: boolean;
 }
 
 export interface UpdateStatus {
@@ -791,9 +811,9 @@ export const api = {
 
   paths: {
     list: () => req<DownloadPath[]>("/paths"),
-    create: (data: { name: string; path: string; is_default: boolean }) =>
+    create: (data: FolderInput) =>
       req<DownloadPath>("/paths", { method: "POST", body: JSON.stringify(data) }),
-    update: (id: number, data: Partial<{ name: string; path: string; is_default: boolean }>) =>
+    update: (id: number, data: Partial<FolderInput>) =>
       req<DownloadPath>(`/paths/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     delete: (id: number) => req(`/paths/${id}`, { method: "DELETE" }),
   },

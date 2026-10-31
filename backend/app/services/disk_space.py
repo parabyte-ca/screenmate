@@ -46,9 +46,11 @@ def check_and_alert(db, settings: dict) -> list[str]:
     low_names: list[str] = []
     changed = False
 
+    from .folders import local_of
+
     for dp in db.query(DownloadPath).all():
         try:
-            free = shutil.disk_usage(dp.path).free
+            free = shutil.disk_usage(local_of(db, dp)).free  # measured where ScreenMate sees it
         except Exception:
             continue
 

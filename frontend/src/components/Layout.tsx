@@ -126,8 +126,10 @@ export default function Layout() {
       return next;
     });
 
+  // relative: absolutely positioned children (e.g. sr-only inputs) stay inside the app
+  // instead of stretching the page, which made the whole page scroll on phones.
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
+    <div className="relative flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
       {onboarding && <OnboardingWizard onClose={() => setOnboarding(false)} />}
       <CommandPalette />
 

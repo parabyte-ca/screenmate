@@ -16,12 +16,27 @@ def startup() -> None:
     from . import config, encoder, store, worker
 
     config.load_from_db()
+    _sync_folders()
     store.recover_interrupted()
     encoder.start_probe()
     worker.start()
     _started = True
     logger.info("Media engine started (%d worker(s), backend=%s)",
                 config.MAX_WORKERS, config.ENCODER_BACKEND)
+
+
+def _sync_folders() -> None:
+    """Media folders come from the Folders list (merged from the old setting on upgrade)."""
+    from sqlalchemy.orm import Session
+    from .. import folders
+    from . import store
+
+    try:
+        with Session(bind=store._engine()) as db:
+            roots = folders.startup(db)
+        logger.info("Media folders: %s", ", ".join(roots) or "none")
+    except Exception:
+        logger.exception("Could not read the Folders list; using the media folders setting")
 
 
 def shutdown() -> None:

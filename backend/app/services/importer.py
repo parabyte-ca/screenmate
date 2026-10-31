@@ -585,6 +585,12 @@ def _after_import(bind) -> None:
     except Exception:
         logger.exception("Reloading media settings after import failed")
     try:
+        from . import folders
+        with Session(bind=bind) as db:
+            folders.refresh(db)  # imported download folders are scanned too
+    except Exception:
+        logger.exception("Refreshing folders after import failed")
+    try:
         with Session(bind=bind) as db:
             journeys.backfill(db)
     except Exception:
