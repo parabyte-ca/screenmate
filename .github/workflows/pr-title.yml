@@ -1,0 +1,24 @@
+name: PR title
+
+# Releases are decided by the PR title (scripts/next_version.py), so a title that
+# isn't conventional silently skips a release. This check makes that visible.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  conventional:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if printf '%s' "$TITLE" | grep -qiE '^(feat|fix|perf|docs|ci|test|chore|refactor|style|build|revert)(\([^)]*\))?!?:[[:space:]]*[^[:space:]]'; then
+            echo "OK: $TITLE"
+          else
+            echo "::error::Start the PR title with a type, e.g. 'feat: …' (minor release), 'fix: …' (patch), 'docs: …' (no release). See README → Releases are automatic."
+            exit 1
+          fi

@@ -15,7 +15,7 @@ LABEL org.opencontainers.image.source="https://github.com/parabyte-ca/screenmate
 LABEL org.opencontainers.image.description="Self-hosted media pipeline: find, download, encode, split"
 LABEL org.opencontainers.image.licenses="MIT"
 
-ARG APP_VERSION=0.1.0
+ARG APP_VERSION=0.8.0
 ENV APP_VERSION=${APP_VERSION}
 
 WORKDIR /app
