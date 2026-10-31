@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
   AlertTriangle,
@@ -11,6 +11,7 @@ import {
   Command,
   Film,
   LogOut,
+  MoreHorizontal,
   MonitorDown,
   Monitor,
   Moon,
@@ -29,13 +30,13 @@ import StatusPill from "./StatusPill";
 import CommandPalette from "./CommandPalette";
 
 const nav = [
-  // mobile: shown in the bottom bar; the rest are a tap away via the palette button.
+  // mobile: a tab in the phone's bottom bar; the rest live under its "More" tab.
   { to: "/search",    label: "Search",    icon: Search,        mobile: true  },
   { to: "/watchlist", label: "Watchlist", icon: Tv,            mobile: true  },
   { to: "/calendar",  label: "Calendar",  icon: CalendarDays,  mobile: false },
   { to: "/activity",  label: "Activity",  icon: Activity,      mobile: true  },
   { to: "/library",   label: "Library",   icon: Film,          mobile: true  },
-  { to: "/insights",  label: "Insights",  icon: TrendingUp,    mobile: true  },
+  { to: "/insights",  label: "Insights",  icon: TrendingUp,    mobile: false },
   { to: "/history",   label: "History",   icon: Clock,         mobile: false },
   { to: "/settings",  label: "Settings",  icon: Settings,      mobile: true  },
   { to: "/updates",   label: "Updates",   icon: ArrowUpCircle, mobile: false },
@@ -52,6 +53,11 @@ export default function Layout() {
   const navigate = useNavigate();
   const [version, setVersion] = useState<string | null>(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const { pathname } = useLocation();
+  const more = nav.filter((n) => !n.mobile);
+  const onMorePage = more.some((n) => pathname.startsWith(n.to));
+  useEffect(() => setMoreOpen(false), [pathname]);
 
   useEffect(() => {
     fetch("/health")
@@ -312,7 +318,60 @@ export default function Layout() {
             {label}
           </NavLink>
         ))}
+        <button
+          type="button"
+          onClick={() => setMoreOpen((o) => !o)}
+          aria-expanded={moreOpen}
+          aria-controls="more-sheet"
+          className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium min-h-[52px] transition-colors ${
+            moreOpen || onMorePage ? "text-blue-600 dark:text-blue-400" : "text-gray-500 dark:text-gray-400"
+          }`}
+        >
+          <span className="relative">
+            <MoreHorizontal className="h-5 w-5" />
+            {updateAvailable && (
+              <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-white dark:ring-gray-900" />
+            )}
+          </span>
+          More
+        </button>
       </nav>
+
+      {/* ── "More" sheet (mobile): the pages that don't fit in the tab bar ──── */}
+      {moreOpen && (
+        <div className="fixed inset-0 z-30 md:hidden" onClick={() => setMoreOpen(false)}>
+          <div className="absolute inset-0 bg-black/30" aria-hidden />
+          <div
+            id="more-sheet"
+            role="menu"
+            aria-label="More pages"
+            onClick={(e) => e.stopPropagation()}
+            className="absolute inset-x-0 bottom-0 rounded-t-2xl bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-2 shadow-xl"
+            style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 60px)" } as React.CSSProperties}
+          >
+            {more.map(({ to, label, icon: Icon }) => (
+              <NavLink
+                key={to}
+                to={to}
+                role="menuitem"
+                className={({ isActive }) =>
+                  `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium ${
+                    isActive
+                      ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+                      : "text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  }`
+                }
+              >
+                <Icon className="h-5 w-5" />
+                <span className="flex-1">{label}</span>
+                {to === "/updates" && updateAvailable && (
+                  <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[11px] font-semibold text-white">New</span>
+                )}
+              </NavLink>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
