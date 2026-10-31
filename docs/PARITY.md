@@ -45,7 +45,7 @@ Status as of v0.8.1: **every item is present**. One FileSplitter bug was found a
 | Split by stream copy | Library → Split | `media/test_engine_e2e.py` |
 | TPDB pHash scene naming (filename fallback) | Split with a TPDB key | `media/test_scenes_naming_fallback.py` |
 | Intro trim | Library → Trim | `media/test_engine_e2e.py` |
-| Rename, stream preview | Library row actions | `media/test_media_routes.py` |
+| Rename, stream preview (+ thumbnails, plays any file by converting on the fly) | Library: click a name or thumbnail; row actions | `media/test_media_routes.py`, `media/test_preview.py` |
 | Delete to `.trash`, 30-day purge, Empty Trash | Library → Delete; Settings → Trash | `media/test_trash.py`, `media/test_media_routes.py` |
 | Skip, cancel, pause/resume queue, clear jobs | Library, Activity | `media/test_media_routes.py`, `media/test_store.py`, `test_activity_routes.py` |
 | Saved-bytes counter | Insights, status pill, Settings | `media/test_store.py`, `test_insights.py` |

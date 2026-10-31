@@ -7,9 +7,10 @@ import os
 import threading
 
 from fastapi import APIRouter, Body
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.concurrency import iterate_in_threadpool
 
-from ..services.media import config, encoder, scanner, scene_namer, trash, worker
+from ..services.media import config, encoder, preview, scanner, scene_namer, trash, worker
 from ..services.media import store as db
 
 router = APIRouter(prefix="/media", tags=["media"])
@@ -46,6 +47,55 @@ def stream_file(file_id: int, download: str | None = None):
         return _err("File not found", 404)
     disposition = "attachment" if download == "1" else "inline"
     return FileResponse(path, filename=row["filename"], content_disposition_type=disposition)
+
+
+def _servable(file_id: int):
+    """The file's row if it exists and lives under a configured media root, else None."""
+    row = db.get_file(file_id)
+    if row is None:
+        return None
+    path = row["path"]
+    if trash._media_root_for(path) is None or not os.path.isfile(path):
+        return None
+    return row
+
+
+@router.get("/files/{file_id}/thumb")
+def file_thumbnail(file_id: int):
+    """A still frame from about 10% into the file (JPEG, cached)."""
+    row = _servable(file_id)
+    if row is None:
+        return _err("File not found", 404)
+    jpg = preview.thumbnail(file_id, row["path"], row["duration_sec"])
+    if jpg is None:
+        return _err("No thumbnail for this file", 404)
+    return FileResponse(jpg, media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/files/{file_id}/play")
+def play_file(file_id: int, start: float = 0.0):
+    """The file converted on the fly to H.264/AAC MP4, for files the browser can't play.
+    `start` (seconds) seeks, since the converted stream has no timeline to seek in."""
+    row = _servable(file_id)
+    if row is None:
+        return _err("File not found", 404)
+    try:
+        player = preview.open_player(row["path"], max(0.0, start))
+    except preview.Busy as exc:
+        return _err(str(exc), 429)
+    except OSError:
+        return _err("ffmpeg is not available", 500)
+
+    async def body():
+        # Stop ffmpeg as soon as the browser stops listening (closed, seeked, paused away).
+        try:
+            async for chunk in iterate_in_threadpool(player.chunks()):
+                yield chunk
+        finally:
+            player.stop()
+
+    return StreamingResponse(body(), media_type="video/mp4", headers={"Cache-Control": "no-store"})
 
 
 @router.post("/files/{file_id}/rename")

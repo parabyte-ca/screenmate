@@ -124,6 +124,7 @@ function RowMenu({ f, onAction }: { f: MediaFile; onAction: (a: string) => void 
       </button>
       {open && (
         <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg">
+          {item("preview", "Preview", Eye)}
           <div className="sm:hidden">
             {item("encode", "Encode…", Film, busy(f))}
             {item("split", "Split…", Scissors, busy(f))}
@@ -137,6 +138,115 @@ function RowMenu({ f, onAction }: { f: MediaFile; onAction: (a: string) => void 
         </div>
       )}
     </div>
+  );
+}
+
+/** A still frame from the file; falls back to an icon when there is none. */
+function Thumb({ f, onOpen }: { f: MediaFile; onOpen: () => void }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <button type="button" onClick={onOpen} aria-label={`Preview ${f.filename}`}
+            className="group relative h-9 w-16 shrink-0 overflow-hidden rounded bg-gray-100 dark:bg-gray-800">
+      {failed ? (
+        <Film className="absolute inset-0 m-auto h-4 w-4 text-gray-400" />
+      ) : (
+        <img src={api.media.thumbUrl(f.id, f.updated_at)} alt="" loading="lazy" decoding="async"
+             onError={() => setFailed(true)} className="h-full w-full object-cover" />
+      )}
+      <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+        <Play className="h-4 w-4 fill-white text-white" />
+      </span>
+    </button>
+  );
+}
+
+function fmtClock(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
+}
+
+/** Plays the original file when the browser can; otherwise (or on request) a version
+ *  ScreenMate converts on the fly. The converted stream has no timeline, so this
+ *  dialog shows its own seek bar and restarts the conversion from the chosen point. */
+function PreviewDialog({ file, onClose }: { file: MediaFile; onClose: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [mode, setMode] = useState<"original" | "converted">("original");
+  const [offset, setOffset] = useState(0);        // where the conversion started (s)
+  const [pos, setPos] = useState(0);              // current position in the file (s)
+  const [note, setNote] = useState<string | null>(null);
+  const duration = file.duration_sec ?? 0;
+
+  const convert = useCallback((from: number, why?: string) => {
+    setMode("converted");
+    setOffset(from);
+    setPos(from);
+    if (why) setNote(why);
+  }, []);
+
+  // The original plays but shows no picture (e.g. HEVC in a browser without it): convert.
+  useEffect(() => {
+    if (mode !== "original") return;
+    const v = videoRef.current;
+    if (!v) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onMeta = () => {
+      timer = setTimeout(() => {
+        if (v.videoWidth === 0) convert(v.currentTime, "This browser can't show this file's video, so ScreenMate is converting it.");
+      }, 2500);
+    };
+    v.addEventListener("loadedmetadata", onMeta);
+    return () => { v.removeEventListener("loadedmetadata", onMeta); if (timer) clearTimeout(timer); };
+  }, [mode, convert]);
+
+  const src = mode === "original" ? api.media.streamUrl(file.id) : api.media.playUrl(file.id, offset);
+
+  return (
+    <Modal title={file.filename} onClose={onClose} wide>
+      <video
+        key={src}
+        ref={videoRef}
+        src={src}
+        controls
+        autoPlay
+        playsInline
+        className="max-h-[65vh] w-full rounded bg-black"
+        onError={() => mode === "original"
+          ? convert(videoRef.current?.currentTime ?? 0, "This browser can't play this file directly, so ScreenMate is converting it.")
+          : setNote("ScreenMate couldn't convert this file. Try Download instead.")}
+        onTimeUpdate={(e) => mode === "converted" && setPos(offset + e.currentTarget.currentTime)}
+      />
+
+      {mode === "converted" && duration > 0 && (
+        <div className="mt-3 flex items-center gap-3 text-xs tabular-nums text-gray-600 dark:text-gray-300">
+          <span>{fmtClock(pos)}</span>
+          <input type="range" min={0} max={Math.floor(duration)} step={1} value={Math.min(pos, duration)}
+                 aria-label="Seek" className="flex-1 accent-blue-600"
+                 onChange={(e) => setPos(Number(e.target.value))}
+                 onMouseUp={(e) => convert(Number((e.target as HTMLInputElement).value))}
+                 onTouchEnd={(e) => convert(Number((e.target as HTMLInputElement).value))}
+                 onKeyUp={(e) => convert(Number((e.target as HTMLInputElement).value))} />
+          <span>{fmtClock(duration)}</span>
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {note ?? (mode === "original" ? "Playing the original file." : "Converted for your browser as it plays (uses some CPU on the server).")}
+        </p>
+        <div className="flex gap-2">
+          {mode === "original" ? (
+            <button className={btnGhost} title="Use this if there's no picture or no sound"
+                    onClick={() => convert(videoRef.current?.currentTime ?? 0, "Converted for your browser as it plays (uses some CPU on the server).")}>
+              <Film className="h-4 w-4" />Compatible playback
+            </button>
+          ) : (
+            <button className={btnGhost} onClick={() => { setMode("original"); setNote(null); }}>Original file</button>
+          )}
+          <a href={api.media.streamUrl(file.id, true)} className={btnGhost}><Download className="h-4 w-4" />Download</a>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -228,6 +338,7 @@ export default function Library() {
   });
 
   const onRowAction = (f: MediaFile, a: string) => {
+    if (a === "preview") return setDialog({ kind: "preview", file: f });
     if (a === "encode") setDialog({ kind: "encode", files: [f] });
     else if (a === "split") setDialog({ kind: "split", files: [f] });
     else if (a === "trim") queue([f], "trim");
@@ -357,13 +468,20 @@ export default function Library() {
                 <tr key={f.id} className={picked.has(f.id) ? "bg-blue-50/60 dark:bg-blue-950/30" : "hover:bg-gray-50 dark:hover:bg-gray-800/50"}>
                   <td className="px-3 py-2"><input type="checkbox" aria-label={`Select ${f.filename}`} checked={picked.has(f.id)} onChange={() => togglePick(f.id)} /></td>
                   <td className="max-w-0 px-2 py-2">
-                    <p className="truncate font-medium text-gray-900 dark:text-gray-100" title={f.path}>{f.filename}</p>
+                   <div className="flex items-center gap-3">
+                    <Thumb f={f} onOpen={() => setDialog({ kind: "preview", file: f })} />
+                    <div className="min-w-0 flex-1">
+                    <button type="button" onClick={() => setDialog({ kind: "preview", file: f })}
+                            className="block max-w-full truncate text-left font-medium text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                            title={`Preview ${f.path}`}>{f.filename}</button>
                     <p className="flex flex-wrap items-center gap-x-2 text-xs text-gray-500 dark:text-gray-400">
                       <span>{f.category}</span>
                       {!!f.is_anthology && <span className="rounded bg-violet-100 dark:bg-violet-900/40 px-1.5 text-violet-700 dark:text-violet-300">anthology</span>}
                       <span className="md:hidden">{f.codec} · {f.height ? `${f.height}p` : "?"} · {fmtSize(f.size_bytes)}</span>
                       {f.error_msg && f.status === "error" && <span className="truncate text-red-600 dark:text-red-400" title={f.error_msg}>{f.error_msg}</span>}
                     </p>
+                    </div>
+                   </div>
                   </td>
                   <td className="hidden whitespace-nowrap px-2 py-2 text-gray-600 dark:text-gray-300 md:table-cell">{f.codec ?? "—"}</td>
                   <td className="hidden whitespace-nowrap px-2 py-2 text-gray-600 dark:text-gray-300 md:table-cell">{f.height ? `${f.height}p` : "—"}</td>
@@ -376,7 +494,7 @@ export default function Library() {
                   </td>
                   <td className="px-2 py-2">
                     <div className="flex items-center justify-end">
-                      <button className={iconBtn} aria-label={`Preview ${f.filename}`} title="Preview" onClick={() => setDialog({ kind: "preview", file: f })}><Eye className="h-4 w-4" /></button>
+                      <button className={`${iconBtn} hidden text-blue-600 dark:text-blue-400 sm:block`} aria-label={`Preview ${f.filename}`} title="Preview" onClick={() => setDialog({ kind: "preview", file: f })}><Play className="h-4 w-4" /></button>
                       <button className={`${iconBtn} hidden sm:block`} aria-label={`Encode ${f.filename}`} title="Encode to x265" disabled={busy(f)} onClick={() => setDialog({ kind: "encode", files: [f] })}><Film className="h-4 w-4" /></button>
                       <button className={`${iconBtn} hidden sm:block`} aria-label={`Split ${f.filename}`} title="Split scenes" disabled={busy(f)} onClick={() => setDialog({ kind: "split", files: [f] })}><Scissors className="h-4 w-4" /></button>
                       <RowMenu f={f} onAction={(a) => onRowAction(f, a)} />
@@ -429,14 +547,7 @@ export default function Library() {
           </div>
         </Modal>
       )}
-      {dialog?.kind === "preview" && (
-        <Modal title={dialog.file.filename} onClose={() => setDialog(null)} wide>
-          <video src={api.media.streamUrl(dialog.file.id)} controls autoPlay className="max-h-[70vh] w-full rounded bg-black" />
-          <div className="mt-3 flex justify-end">
-            <a href={api.media.streamUrl(dialog.file.id, true)} className={btnGhost}><Download className="h-4 w-4" />Download</a>
-          </div>
-        </Modal>
-      )}
+      {dialog?.kind === "preview" && <PreviewDialog file={dialog.file} onClose={() => setDialog(null)} />}
     </div>
   );
 }
