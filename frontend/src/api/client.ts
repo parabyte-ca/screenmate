@@ -25,7 +25,12 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error("Session expired. Please log in.");
   }
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+    // A proxy in front of ScreenMate answers with HTML while the container restarts.
+    const err = await res.json().catch(() => ({
+      detail: res.status >= 502 && res.status <= 504
+        ? `ScreenMate isn't responding (HTTP ${res.status}). It may be restarting.`
+        : `Request failed (HTTP ${res.status}).`,
+    }));
     throw new Error(err.detail ?? err.msg ?? "Request failed");
   }
   return res.json() as Promise<T>;

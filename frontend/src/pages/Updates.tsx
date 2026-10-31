@@ -5,6 +5,30 @@ import { marked } from "marked";
 
 marked.setOptions({ async: false });
 
+/** An upgrade started from this browser. ScreenMate restarts during it, so the
+ *  page keeps reconnecting until the new version answers (survives a refresh). */
+type Pending = { from: string; to: string; at: number };
+const PENDING_KEY = "sm-upgrade-pending";
+const PENDING_MAX_MS = 30 * 60 * 1000;
+
+function readPending(): Pending | null {
+  try {
+    const p = JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null") as Pending | null;
+    return p && Date.now() - p.at < PENDING_MAX_MS ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePending(p: Pending | null) {
+  try {
+    if (p) sessionStorage.setItem(PENDING_KEY, JSON.stringify(p));
+    else sessionStorage.removeItem(PENDING_KEY);
+  } catch { /* private mode: the page still works, it just forgets on refresh */ }
+}
+
+const vtag = (v: string) => (v.startsWith("v") ? v : `v${v}`);
+
 function renderMarkdown(md: string): string {
   const result = marked.parse(md) as string;
   return result;
@@ -38,6 +62,8 @@ export default function Updates() {
   const [showLog, setShowLog] = useState(false);
   const logRef = useRef<HTMLPreElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [pending, setPending] = useState<Pending | null>(readPending);
+  const [upgradedTo, setUpgradedTo] = useState<string | null>(null);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -45,6 +71,15 @@ export default function Updates() {
       const s = await api.updates.status();
       setStatus(s);
       setError(null);
+      const p = readPending();
+      if (p) {
+        const done = s.current_version.replace(/^v/, "") === p.to.replace(/^v/, "");
+        if (done) setUpgradedTo(p.to);
+        if (done || s.upgrade_state === "failed") {
+          writePending(null);
+          setPending(null);
+        }
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -52,9 +87,11 @@ export default function Updates() {
     }
   }, []);
 
-  // Poll while upgrade is in-progress
+  // Poll while an upgrade is in progress, while one started here hasn't finished
+  // (ScreenMate stops answering while it restarts), and while the page can't load.
   useEffect(() => {
-    const inProgress = status?.upgrade_state === "requested" || status?.upgrade_state === "running";
+    const inProgress = status?.upgrade_state === "requested" || status?.upgrade_state === "running"
+      || !!pending || (!status && !!error);
     if (inProgress && !pollRef.current) {
       pollRef.current = setInterval(() => load(true), 5000);
     }
@@ -65,7 +102,7 @@ export default function Updates() {
     return () => {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     };
-  }, [status?.upgrade_state, load]);
+  }, [status?.upgrade_state, status, pending, error, load]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -95,11 +132,21 @@ export default function Updates() {
     setConfirm(null);
     setUpgrading(true);
     setShowLog(true);
+    setUpgradedTo(null);
+    const p = { from: status?.current_version ?? "", to: version, at: Date.now() };
+    writePending(p);
+    setPending(p);
     try {
       const s = await api.updates.upgrade(version, rollback);
       setStatus(s);
     } catch (e) {
-      setError((e as Error).message);
+      const msg = (e as Error).message;
+      // Refused by ScreenMate itself (a JSON reason): nothing was started.
+      if (!/isn't responding|Failed to fetch|NetworkError|Load failed/i.test(msg)) {
+        writePending(null);
+        setPending(null);
+      }
+      setError(msg);
     } finally {
       setUpgrading(false);
     }
@@ -114,6 +161,28 @@ export default function Updates() {
   }
 
   const inProgress = status?.upgrade_state === "requested" || status?.upgrade_state === "running";
+  // While an upgrade started here is under way, losing the connection is expected.
+  const reconnecting = !!pending && !!error;
+
+  if (!status) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Updates</h1>
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 space-y-2">
+          <div className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
+            <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />
+            {pending ? `Upgrading to ${vtag(pending.to)}…` : "Can't reach ScreenMate"}
+          </div>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {pending
+              ? "ScreenMate restarts during an upgrade, so it stops answering for a minute or two. This page reconnects by itself."
+              : error}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Retrying every 5 seconds.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
@@ -129,7 +198,21 @@ export default function Updates() {
         </button>
       </div>
 
-      {error && (
+      {upgradedTo && (
+        <div className="flex items-start gap-3 rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 p-4 text-sm text-green-700 dark:text-green-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+          Upgraded to {vtag(upgradedTo)}.
+        </div>
+      )}
+
+      {reconnecting && (
+        <div className="flex items-start gap-3 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-4 text-sm text-blue-700 dark:text-blue-300">
+          <RefreshCw className="h-4 w-4 shrink-0 mt-0.5 animate-spin" />
+          Upgrading to {vtag(pending!.to)}. ScreenMate is restarting; this page reconnects by itself.
+        </div>
+      )}
+
+      {error && !reconnecting && (
         <div className="flex items-start gap-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4 text-sm text-red-700 dark:text-red-400">
           <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
           {error}
