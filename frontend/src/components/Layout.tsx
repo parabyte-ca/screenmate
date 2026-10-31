@@ -22,7 +22,7 @@ import {
   Tv,
 } from "lucide-react";
 import AppLogo from "./AppLogo";
-import { useTheme, type Theme } from "../ThemeContext";
+import { PALETTES, useTheme, type Theme } from "../ThemeContext";
 import { authStore } from "../auth";
 import { api } from "../api/client";
 import OnboardingWizard from "./OnboardingWizard";
@@ -49,7 +49,7 @@ const themeButtons: { value: Theme; icon: typeof Sun; title: string }[] = [
 ];
 
 export default function Layout() {
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, palette, setPalette } = useTheme();
   const navigate = useNavigate();
   const [version, setVersion] = useState<string | null>(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -231,6 +231,23 @@ export default function Layout() {
             collapsed ? "flex flex-col items-center gap-1.5 px-2" : "px-4"
           }`}
         >
+          {!collapsed && (
+            <div className="mb-2 flex items-center gap-1.5" role="radiogroup" aria-label="Colour theme">
+              {PALETTES.map((p) => (
+                <button
+                  key={p.id}
+                  role="radio"
+                  aria-checked={palette === p.id}
+                  title={`${p.name} (${p.note})`}
+                  onClick={() => setPalette(p.id)}
+                  style={{ background: p.swatch }}
+                  className={`h-4 w-4 rounded-full ring-offset-2 ring-offset-white dark:ring-offset-gray-900 transition-shadow ${
+                    palette === p.id ? "ring-2 ring-gray-400 dark:ring-gray-500" : "hover:ring-2 hover:ring-gray-200 dark:hover:ring-gray-700"
+                  } ${p.id === "graphite" ? "dark:outline dark:outline-1 dark:outline-gray-600" : ""}`}
+                />
+              ))}
+            </div>
+          )}
           <div className={`flex ${collapsed ? "flex-col gap-1" : "gap-1 mb-2"}`}>
             {themeButtons.map(({ value, icon: Icon, title }) => (
               <button
