@@ -108,3 +108,12 @@ def delete_path(path_id: int, db: Session = Depends(get_db)):
     db.commit()
     folders.refresh(db)
     return {"ok": True}
+
+
+@router.post("/paths/{path_id}/test")
+def test_path(path_id: int, db: Session = Depends(get_db)):
+    """Check a saved folder: visible, readable, writable, free space, and qBittorrent's view."""
+    dp = db.query(DownloadPath).filter(DownloadPath.id == path_id).first()
+    if dp is None:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return folders.check(db, dp, _threshold(db))

@@ -114,6 +114,37 @@ def remove_torrent(info_hash: str, delete_files: bool = False) -> None:
     client.torrents_delete(delete_files=delete_files, torrent_hashes=info_hash)
 
 
+# qBittorrent 5.0 added app/getDirectoryContent in Web API 2.11.2. Older versions
+# answer 404 for the unknown endpoint, the same as 5.x does for a missing folder, so
+# the version decides what a 404 means.
+_DIR_API = (2, 11, 2)
+
+
+def _api_version(client) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in str(client.app_web_api_version()).split("."))
+    except Exception:
+        return ()
+
+
+def directory_exists(path: str) -> bool | None:
+    """Whether qBittorrent can see `path`. None when it can't be asked: not
+    connected, or qBittorrent 4.x, which has no way to check."""
+    try:
+        client = _get_client()
+    except Exception:
+        return None
+    if _api_version(client) < _DIR_API:
+        return None
+    try:
+        client.app_get_directory_content(directory_path=path)
+        return True
+    except Exception as e:
+        # qbittorrentapi's HTTP errors carry the status; 5.x answers 404/409/400
+        # for a folder that doesn't exist or can't be listed.
+        return False if getattr(e, "http_status_code", None) in (400, 404, 409) else None
+
+
 def test_connection() -> tuple[bool, str]:
     try:
         client = _get_client()
