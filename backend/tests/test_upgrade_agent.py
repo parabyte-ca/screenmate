@@ -41,6 +41,22 @@ def test_every_run_writes_a_heartbeat(repo):
     assert a["busy"] is False and a["every_minutes"] == 5 and a["last_seen"].endswith("Z")
 
 
+def test_a_container_path_in_env_is_ignored(repo):
+    # An old .env carried APP_UPGRADE_FOLDER=/upgrade, the container's path. On a
+    # read-only host root (TrueNAS) "mkdir /upgrade" failed and no heartbeat was written.
+    (repo / ".env").write_text("APP_UPGRADE_FOLDER=/proc/screenmate-not-writable\n")
+    proc = run(repo)
+    assert proc.returncode == 0, proc.stderr
+    assert agent(repo)["busy"] is False
+
+
+def test_an_unusable_host_folder_is_named_in_the_error(repo):
+    (repo / ".env").write_text("UPGRADE_HOST_FOLDER=/proc/screenmate-not-writable\n")
+    proc = run(repo)
+    assert proc.returncode != 0
+    assert "Cannot create the upgrade folder /proc/screenmate-not-writable" in proc.stderr
+
+
 def test_a_run_that_finds_the_lock_held_still_reports_in_as_busy(repo):
     holder = subprocess.Popen(["flock", str(repo / "upgrade" / ".lock"), "sleep", "10"])
     try:

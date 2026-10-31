@@ -7,15 +7,14 @@
 # Usage:
 #   sudo bash upgrade-agent.sh [--install | --uninstall | --print]
 #
-# Setup:
-#   1.  Mount the same upgrade folder into the container:
-#         volumes:
-#           - /opt/screenmate/upgrade:/upgrade
-#       Set APP_UPGRADE_FOLDER=/upgrade in the container environment.
-#   2.  Create /opt/screenmate/upgrade  (or wherever you mount it).
-#   3.  Run  sudo bash upgrade-agent.sh --install
+# Setup (setup.sh does all of this):
+#   1.  docker-compose.yml mounts ./upgrade (next to this repo's scripts/) into
+#       the container as /upgrade. This helper uses that same folder on the host:
+#       <repo>/upgrade, or UPGRADE_HOST_FOLDER if you set it.
+#       (APP_UPGRADE_FOLDER is the container's path, /upgrade, and is ignored here.)
+#   2.  Run  sudo bash upgrade-agent.sh --install
 #       This installs a cron entry that fires every 5 minutes.
-#   4.  Verify with  sudo bash upgrade-agent.sh --print
+#   3.  Verify with  sudo bash upgrade-agent.sh --print
 
 set -euo pipefail
 
@@ -92,7 +91,10 @@ if [[ -f "$ENV_FILE" ]]; then
     done < "$ENV_FILE"
 fi
 
-UPGRADE_FOLDER="${APP_UPGRADE_FOLDER:-$REPO_DIR/upgrade}"
+# The host side of the folder the container sees as /upgrade. Never APP_UPGRADE_FOLDER:
+# that is the path inside the container (an old .env.example put it in .env), and on
+# a read-only host root such as TrueNAS "mkdir /upgrade" fails before any heartbeat.
+UPGRADE_FOLDER="${UPGRADE_HOST_FOLDER:-$REPO_DIR/upgrade}"
 
 # Allow extra args to update.sh but ONLY --pull and --skip-preflight.
 EXTRA_ARGS=""
@@ -106,7 +108,8 @@ fi
 
 # Take an exclusive lock on the upgrade folder so only one copy runs at a time.
 LOCK_FILE="$UPGRADE_FOLDER/.lock"
-mkdir -p "$UPGRADE_FOLDER"
+mkdir -p "$UPGRADE_FOLDER" 2>/dev/null \
+    || die "Cannot create the upgrade folder $UPGRADE_FOLDER. It should be the folder docker-compose mounts as /upgrade (normally $REPO_DIR/upgrade); fix UPGRADE_HOST_FOLDER in .env or create it."
 exec 9>"$LOCK_FILE"
 BUSY=false
 flock -n 9 || BUSY=true

@@ -73,7 +73,9 @@ def test_unattended_install(repo, tmp_path):
     env = env_of(r)
     assert (env["SCREENMATE_PORT"], env["TZ"], env["ENCODER_BACKEND"]) == ("5000", "America/Toronto", "cpu")
     assert env["MEDIA_PATHS"] == f"{media},/mnt/movies"
-    assert env["DATABASE_URL"].endswith("screenmate.db")  # .env.example was the starting point
+    # .env.example was the starting point, without the container-only paths
+    assert "DATABASE_URL" not in env and "APP_UPGRADE_FOLDER" not in env
+    assert "# DATABASE_URL=" in (r / ".env").read_text()
     override = (r / "docker-compose.override.yml").read_text()
     assert f'"{media}:{media}"' in override and '"/mnt/movies:/mnt/movies"' in override
     assert "build:" not in override and "nvidia" not in override
@@ -95,6 +97,22 @@ def test_rerun_keeps_previous_answers_and_does_not_duplicate(repo):
     assert env["TZ"] == "Europe/London"  # from the host
     assert (r / ".env").read_text().count("SCREENMATE_PORT=") == 1
     assert "services:" in (r / "docker-compose.override.yml").read_text()
+
+
+def test_an_old_env_loses_its_container_only_paths(repo):
+    # Earlier .env.example put the container's paths in .env; the host-side upgrade
+    # helper then tried to create /upgrade on the host (read-only on TrueNAS).
+    r, _, _ = repo
+    old = "DATABASE_URL=sqlite:////app/data/screenmate.db\nAPP_UPGRADE_FOLDER=/upgrade\nMY_OWN=1\n"
+    (r / ".env").write_text(old)
+    proc, _ = run(repo, "-y", "--no-agent")
+    assert proc.returncode == 0, proc.stderr
+    env = env_of(r)
+    assert "DATABASE_URL" not in env and "APP_UPGRADE_FOLDER" not in env and env["MY_OWN"] == "1"
+    assert (r / ".env.bak").read_text() == old
+    assert "Commented out container-only paths" in proc.stdout
+    proc, _ = run(repo, "-y", "--no-agent")                  # a second run changes nothing more
+    assert "Commented out" not in proc.stdout and (r / ".env.bak").read_text() == old
 
 
 def test_gpu_build_and_agent(repo):

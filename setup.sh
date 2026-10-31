@@ -147,6 +147,14 @@ chmod 770 upgrade
 if [[ ! -f "$ENV_FILE" && -f "$REPO_DIR/.env.example" ]]; then
     cp "$REPO_DIR/.env.example" "$ENV_FILE"
 fi
+# Older .env files carried container-only paths copied from .env.example. The container
+# never read them (docker-compose.yml sets both), but the host-side upgrade helper did,
+# and tried to create /upgrade on the host. Comment them out.
+if grep -qE '^(DATABASE_URL|APP_UPGRADE_FOLDER)=' "$ENV_FILE" 2>/dev/null; then
+    [[ -f "$ENV_FILE.bak" ]] || cp "$ENV_FILE" "$ENV_FILE.bak"
+    sed -i -E 's/^(DATABASE_URL|APP_UPGRADE_FOLDER)=/# &/' "$ENV_FILE"
+    info "Commented out container-only paths in .env (the old file is .env.bak)"
+fi
 media_csv="$(IFS=','; echo "${CLEAN_MEDIA[*]:-}")"
 set_env SCREENMATE_PORT "$PORT"
 set_env TZ "$TZ_VALUE"
