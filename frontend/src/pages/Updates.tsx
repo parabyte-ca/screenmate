@@ -29,6 +29,38 @@ function writePending(p: Pending | null) {
 
 const vtag = (v: string) => (v.startsWith("v") ? v : `v${v}`);
 
+/** Past this, the page suggests looking at the upgrade log on the host. */
+const SLOW_MS = 15 * 60 * 1000;
+
+function elapsedText(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** What an upgrade started here is doing, with a running timer. */
+function UpgradeProgress({ pending, everyMinutes, now }: { pending: Pending; everyMinutes: number; now: number }) {
+  const elapsed = now - pending.at;
+  return (
+    <div className="space-y-1">
+      <p>
+        <span className="font-medium">Upgrading to {vtag(pending.to)}</span>
+        {" · "}
+        <span className="font-mono tabular-nums">{elapsedText(elapsed)}</span> elapsed
+      </p>
+      <p className="opacity-90">
+        The helper picks up the request within {everyMinutes} minutes, then downloads the new version and
+        restarts ScreenMate. It stops answering for a minute or two while it restarts; this page reconnects by itself.
+      </p>
+      {elapsed > SLOW_MS && (
+        <p className="opacity-90">
+          This is taking longer than usual. On the host, check{" "}
+          <code className="font-mono">tail -20 upgrade/upgrade.log</code>.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function renderMarkdown(md: string): string {
   const result = marked.parse(md) as string;
   return result;
@@ -64,6 +96,14 @@ export default function Updates() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [pending, setPending] = useState<Pending | null>(readPending);
   const [upgradedTo, setUpgradedTo] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  // Tick the upgrade timer once a second while an upgrade started here is under way.
+  useEffect(() => {
+    if (!pending) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [pending]);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -163,21 +203,27 @@ export default function Updates() {
   const inProgress = status?.upgrade_state === "requested" || status?.upgrade_state === "running";
   // While an upgrade started here is under way, losing the connection is expected.
   const reconnecting = !!pending && !!error;
+  const everyMinutes = status?.helper?.every_minutes || 5;
 
   if (!status) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Updates</h1>
         <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 space-y-2">
-          <div className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
-            <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />
-            {pending ? `Upgrading to ${vtag(pending.to)}…` : "Can't reach ScreenMate"}
-          </div>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            {pending
-              ? "ScreenMate restarts during an upgrade, so it stops answering for a minute or two. This page reconnects by itself."
-              : error}
-          </p>
+          {pending ? (
+            <div className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <RefreshCw className="h-4 w-4 shrink-0 mt-0.5 animate-spin text-blue-500" />
+              <UpgradeProgress pending={pending} everyMinutes={everyMinutes} now={now} />
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
+                <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />
+                Can't reach ScreenMate
+              </div>
+              <p className="text-sm text-gray-600 dark:text-gray-400">{error}</p>
+            </>
+          )}
           <p className="text-xs text-gray-500 dark:text-gray-400">Retrying every 5 seconds.</p>
         </div>
       </div>
@@ -205,10 +251,10 @@ export default function Updates() {
         </div>
       )}
 
-      {reconnecting && (
+      {pending && (
         <div className="flex items-start gap-3 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-4 text-sm text-blue-700 dark:text-blue-300">
           <RefreshCw className="h-4 w-4 shrink-0 mt-0.5 animate-spin" />
-          Upgrading to {vtag(pending!.to)}. ScreenMate is restarting; this page reconnects by itself.
+          <UpgradeProgress pending={pending} everyMinutes={everyMinutes} now={now} />
         </div>
       )}
 
