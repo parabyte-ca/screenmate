@@ -29,6 +29,22 @@ def target(tmp_path, monkeypatch):
     engine.dispose()
 
 
+AUTORRENT_OWN = {
+    "app_source_url": "https://github.com/parabyte-ca/autorrent",
+    "app_version": "3.4.1",
+    "update_release_cache": '{"tag": "v3.5.0"}',
+    "update_notified_version": "3.5.0",
+    "update_previous_version": "3.3.0",
+    "upgrade_state": "pending",
+    "qbit_category": "autorrent",
+    "disk_warned": "true",
+    "trakt_last_result": '{"added": 2}',
+    "last_digest_sent_at": "2026-01-05T08:00:00",
+}
+FILESPLITTER_OWN = {"app_version": "2.7.0", "update_release_cache": "{}", "media_paths": "/media/old",
+                    "upgrade_state": "done", "secret_key": "theirs", "queue_paused": "1"}
+
+
 def make_autorrent(path):
     """An AuTorrent database: ScreenMate's original tables, minus a later column."""
     eng = create_engine(f"sqlite:///{path}")
@@ -44,7 +60,10 @@ def make_autorrent(path):
         c.execute(text("INSERT INTO download_history (name, source, torrent_hash, status, watchlist_id, added_at) "
                        "VALUES ('Severance S02E03', 'watchlist', 'abc', 'completed', 5, '2026-01-02 10:00:00')"))
         c.execute(text("INSERT INTO trakt_seen (trakt_id, title, status) VALUES (42, 'Severance', 'added')"))
-        for k, v in [("qbit_host", "10.0.0.5"), ("session_secret", "theirs"), ("scan_interval", "30")]:
+        for k, v in [("qbit_host", "10.0.0.5"), ("session_secret", "theirs"), ("scan_interval_minutes", "30"),
+                     ("default_profile_id", "3"),
+                     # About AuTorrent itself, not your preferences: must never come across.
+                     *AUTORRENT_OWN.items()]:
             c.execute(text("INSERT INTO settings (key, value) VALUES (:k, :v)"), {"k": k, "v": v})
         c.execute(text("ALTER TABLE watchlist DROP COLUMN poster_url"))  # an older schema
     eng.dispose()
@@ -66,9 +85,9 @@ def make_filesplitter(path, media_root="/media/old"):
             (12, '{media_root}/b.mkv', 'b.mkv', 'h264', 'queued', 720);
         INSERT INTO jobs (file_id, job_type, status, saved_bytes, finished_at) VALUES
             (11, 'encode', 'done', 500, '2026-01-01T00:00:00+00:00'), (12, 'encode', 'queued', 0, NULL);
-        INSERT INTO settings VALUES ('x265_crf', '22'), ('total_saved_bytes', '1000'),
-            ('secret_key', 'theirs'), ('queue_paused', '1');
+        INSERT INTO settings VALUES ('x265_crf', '22'), ('total_saved_bytes', '1000');
     """)
+    con.executemany("INSERT INTO settings VALUES (?, ?)", FILESPLITTER_OWN.items())
     con.commit()
     con.close()
 
@@ -96,6 +115,9 @@ def test_inspect_reports_contents(target, tmp_path):
     assert a["kind"] == "autorrent" and a["counts"]["watchlist"] == 1 and a["counts"]["downloads"] == 1
     assert f["kind"] == "filesplitter" and f["counts"]["files"] == 2 and f["counts"]["saved_bytes"] == 1000
     assert f["counts"]["files_found_here"] == 0 and f["sample_paths"][0] == "/media/old/a.mkv"
+    # Only settings that will come across are counted: qbit_host, scan_interval_minutes,
+    # default_profile_id; x265_crf for FileSplitter (total_saved_bytes is reported on its own).
+    assert (a["counts"]["settings"], f["counts"]["settings"]) == (3, 1)
 
 
 def test_full_import_merges_both(target, tmp_path):
@@ -113,19 +135,21 @@ def test_full_import_merges_both(target, tmp_path):
     assert out["backup"] and out["backup"].endswith(".db")
     by_kind = {r["kind"]: r["imported"] for r in out["results"]}
     assert by_kind["autorrent"] == {"folders": 1, "profiles": 1, "watchlist": 1, "episodes": 1,
-                                    "downloads": 1, "history": 1, "trakt_seen": 1, "settings": 1}
+                                    "downloads": 1, "history": 1, "trakt_seen": 1, "settings": 2}
     assert by_kind["filesplitter"]["files"] == 2 and by_kind["filesplitter"]["jobs"] == 2
     with engine.connect() as c:
         s = dict(c.execute(text("SELECT key, value FROM settings")).all())
         assert s["session_secret"] == "mine"          # never imported
         assert s["qbit_host"] == "keep-me"            # existing values kept by default
-        assert s["scan_interval"] == "30"             # new ones added
+        assert s["scan_interval_minutes"] == "30"     # new ones added
         assert s["x265_crf"] == "22" and s["total_saved_bytes"] == "1000"
-        assert "secret_key" not in s and "queue_paused" not in s
+        # Nothing about the old apps themselves: versions, update state, repo URLs, caches.
+        assert not (set(AUTORRENT_OWN) | set(FILESPLITTER_OWN)) & set(s), set(s)
         wl = c.execute(text("SELECT id, download_path_id, profile_id FROM watchlist")).one()
         path_id = c.execute(text("SELECT id FROM download_paths WHERE path='/tv'")).scalar()
         prof_id = c.execute(text("SELECT id FROM quality_profiles WHERE name='HD'")).scalar()
         assert (wl.download_path_id, wl.profile_id) == (path_id, prof_id)  # ids remapped
+        assert s["default_profile_id"] == str(prof_id)  # the setting follows the remapped profile
         assert c.execute(text("SELECT is_default FROM download_paths WHERE path='/tv'")).scalar() == 0
         assert c.execute(text("SELECT watchlist_id FROM downloads")).scalar() == wl.id
         files = dict(c.execute(text("SELECT path, status FROM media_files")).all())
@@ -181,3 +205,41 @@ def test_api_inspect_and_run(target, tmp_path, monkeypatch):
     out = client.post("/api/import/run", json={"tokens": [r[0]["token"]]}).json()
     assert out["ok"] and out["results"][0]["imported"]["files"] == 2
     assert client.post("/api/import/run", json={"tokens": [r[0]["token"]]}).status_code == 400  # consumed
+
+
+def test_compare_settings_shows_only_differences_and_hides_secrets(target, tmp_path):
+    engine, _ = target
+    make_autorrent(tmp_path / "autorrent.db")
+    make_filesplitter(tmp_path / "filesplitter.db")
+    with engine.begin() as c:
+        c.execute(text("INSERT INTO settings (key, value) VALUES ('qbit_host', 'keep-me'), "
+                       "('scan_interval_minutes', '30'), ('qbit_password', 'mine-pw')"))
+    with sqlite3.connect(tmp_path / "autorrent.db") as con:
+        con.execute("INSERT INTO settings VALUES ('qbit_password', 'their-pw')")
+    tokens = [_upload(tmp_path / "autorrent.db"), _upload(tmp_path / "filesplitter.db")]
+
+    out = importer.compare_settings(engine, tokens)
+    rows = {r["key"]: r for r in out["differences"]}
+    assert set(rows) == {"qbit_host", "qbit_password", "default_profile_id", "x265_crf"}
+    assert out["same"] == 1                                   # scan_interval_minutes: 30 both sides
+    assert (rows["qbit_host"]["here"], rows["qbit_host"]["incoming"]) == ("keep-me", "10.0.0.5")
+    assert rows["qbit_host"]["import_by_default"] is False   # you set it here
+    assert rows["x265_crf"]["source"] == "filesplitter" and rows["x265_crf"]["import_by_default"] is True
+    assert rows["default_profile_id"]["incoming"] == "HD"     # shown by name, not ID
+    pw = rows["qbit_password"]
+    assert pw["secret"] and "their-pw" not in str(pw) and "mine-pw" not in str(pw)
+    assert not (set(AUTORRENT_OWN) | set(FILESPLITTER_OWN)) & set(rows)
+
+
+def test_choices_decide_per_setting(target, tmp_path):
+    engine, _ = target
+    make_autorrent(tmp_path / "autorrent.db")
+    with engine.begin() as c:
+        c.execute(text("INSERT INTO settings (key, value) VALUES ('qbit_host', 'keep-me'), ('scan_interval_minutes', '5')"))
+    importer.run(engine, [_upload(tmp_path / "autorrent.db")],
+                 choices={"qbit_host": True, "scan_interval_minutes": False})
+    with engine.connect() as c:
+        s = dict(c.execute(text("SELECT key, value FROM settings")).all())
+    assert s["qbit_host"] == "10.0.0.5"          # taken although set here
+    assert s["scan_interval_minutes"] == "5"     # kept although it differs
+    assert "default_profile_id" in s             # not mentioned: default rule (fill blanks)

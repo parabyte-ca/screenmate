@@ -554,6 +554,40 @@ export interface ImportRunResult {
   ok: boolean;
   backup: string | null;
   results: { token: string; kind: "autorrent" | "filesplitter"; imported: Record<string, number> }[];
+  mappings_added?: number;
+}
+
+/** A prefix change found by looking for the old paths' tails on this server. */
+export interface PathSuggestion {
+  from: string;
+  to: string;
+  matched: number;
+  checked: number;
+  via?: "filesplitter";
+}
+
+export interface SettingDifference {
+  key: string;
+  label: string;
+  source: "autorrent" | "filesplitter";
+  here: string;
+  incoming: string;
+  secret: boolean;
+  set_here: boolean;
+  import_by_default: boolean;
+}
+
+export interface SettingsComparison {
+  differences: SettingDifference[];
+  same: number;
+}
+
+export interface ImportPathSuggestions {
+  rewrite: PathSuggestion | null;
+  files_checked: number;
+  mappings: PathSuggestion[];
+  folders_checked: number;
+  folders_missing: number;
 }
 
 export interface PushConfig {
@@ -708,7 +742,16 @@ export const api = {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "Upload failed");
       return res.json();
     },
-    run: (tokens: string[], opts: { overwrite_settings?: boolean; path_rewrite?: { from: string; to: string } } = {}) =>
+    compareSettings: (tokens: string[]) =>
+      req<SettingsComparison>("/import/compare-settings", { method: "POST", body: JSON.stringify({ tokens }) }),
+    suggestPaths: (tokens: string[]) =>
+      req<ImportPathSuggestions>("/import/suggest-paths", { method: "POST", body: JSON.stringify({ tokens }) }),
+    run: (tokens: string[], opts: {
+      overwrite_settings?: boolean;
+      path_rewrite?: { from: string; to: string };
+      path_mappings?: { from: string; to: string }[];
+      settings_choices?: Record<string, boolean>;
+    } = {}) =>
       req<ImportRunResult>("/import/run", { method: "POST", body: JSON.stringify({ tokens, ...opts }) }),
   },
 
