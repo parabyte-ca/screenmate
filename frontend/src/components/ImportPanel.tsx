@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Database, FolderSync, Loader2, Upload } from "lucide-react";
 import { api, type ImportInspect, type ImportPathSuggestions, type ImportRunResult, type SettingsComparison } from "../api/client";
 import { fmtSize } from "../utils";
@@ -39,6 +39,9 @@ export default function ImportPanel({ onImported }: { onImported?: (r: ImportRun
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [result, setResult] = useState<ImportRunResult | null>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
+  // The panel shrinks a lot once the import is done; keep the result on screen.
+  useEffect(() => { if (result) resultRef.current?.scrollIntoView({ block: "start" }); }, [result]);
   const [paths, setPaths] = useState<ImportPathSuggestions | null>(null);
   const [useMapping, setUseMapping] = useState<Record<string, boolean>>({});
   const [compare, setCompare] = useState<SettingsComparison | null>(null);
@@ -105,7 +108,7 @@ export default function ImportPanel({ onImported }: { onImported?: (r: ImportRun
 
   if (result) {
     return (
-      <div className="rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30 p-3 text-sm text-green-800 dark:text-green-200">
+      <div ref={resultRef} className="scroll-mt-16 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30 p-3 text-sm text-green-800 dark:text-green-200">
         <p className="flex items-center gap-1.5 font-medium"><CheckCircle2 className="h-4 w-4" />Import complete</p>
         {result.results.map((r) => (
           <p key={r.token} className="mt-1">
@@ -126,7 +129,7 @@ export default function ImportPanel({ onImported }: { onImported?: (r: ImportRun
 
   return (
     <div className="space-y-3">
-      <label className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 p-5 text-center text-sm text-gray-600 dark:text-gray-300 hover:border-blue-400 ${busy ? "opacity-60" : ""}`}>
+      <label className={`relative flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 p-5 text-center text-sm text-gray-600 dark:text-gray-300 hover:border-blue-400 ${busy ? "opacity-60" : ""}`}>
         {busy ? <Loader2 className="h-5 w-5 animate-spin text-blue-600" /> : <Upload className="h-5 w-5 text-gray-400" />}
         <span>Choose <code>autorrent.db</code> and/or <code>filesplitter.db</code></span>
         <span className="text-xs text-gray-400">They're in each app's <code>data/</code> folder. Nothing changes until you press Import.</span>
