@@ -9,6 +9,8 @@ export const PALETTES = [
   { id: "lagoon",    name: "Lagoon",    swatch: "#0d9488", note: "Teal on slate" },
   { id: "velvet",    name: "Velvet",    swatch: "#e11d48", note: "Deep rose on zinc" },
   { id: "graphite",  name: "Graphite",  swatch: "#27272a", note: "Monochrome" },
+  { id: "midnight",  name: "Midnight",  swatch: "#4f46e5", note: "Indigo on slate" },
+  { id: "sunset",    name: "Sunset",    swatch: "#ea580c", note: "Orange on neutral" },
 ] as const;
 export type Palette = (typeof PALETTES)[number]["id"];
 const PALETTE_KEY = "sm-palette";
