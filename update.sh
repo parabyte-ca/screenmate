@@ -110,6 +110,21 @@ if [[ -n "$_GIT_USER" && -d "$REPO_DIR/.git" ]]; then
         info "Restoring ownership of .git to $_GIT_USER (an earlier run of git as another user left files it cannot write) ..."
         chown -R "$_GIT_USER:" "$REPO_DIR/.git" || info "Could not change ownership — continuing; git may report a permission error."
     fi
+    # The same for the app's own files: git replaces them on every update and fails
+    # with "unable to unlink old 'Dockerfile': Permission denied" when root owns them.
+    # data/ and upgrade/ are left alone — the container and the upgrade helper write there.
+    _skip=(\( -path "$REPO_DIR/.git" -o -path "$REPO_DIR/data" -o -path "$REPO_DIR/upgrade" \) -prune -o)
+    if [[ -n "$(find "$REPO_DIR" "${_skip[@]}" ! -user "$_GIT_USER" -print -quit 2>/dev/null)" ]]; then
+        info "Restoring ownership of the app's files to $_GIT_USER (some belong to another user, so git cannot replace them) ..."
+        find "$REPO_DIR" "${_skip[@]}" ! -user "$_GIT_USER" -exec chown "$_GIT_USER:" {} + \
+            || info "Could not change ownership — continuing; git may report a permission error."
+    fi
+    # Git also needs to write in every folder it updates.
+    if [[ -n "$(find "$REPO_DIR" "${_skip[@]}" -type d ! -perm -u=w -print -quit 2>/dev/null)" ]]; then
+        info "Letting $_GIT_USER write in the app's folders again ..."
+        find "$REPO_DIR" "${_skip[@]}" -type d ! -perm -u=w -exec chmod u+w {} + \
+            || info "Could not change folder permissions — continuing; git may report a permission error."
+    fi
 fi
 
 # A GitHub remote can be fetched anonymously over HTTPS if the repository is
@@ -122,7 +137,7 @@ fi
 
 # Git failed: say what to try instead of leaving a bare "exit 1".
 git_failed() {
-    die "git could not update $REPO_DIR (see the message above). If it mentions permissions, the git files may belong to another user — fix with: sudo chown -R \"\$(stat -c %U '$REPO_DIR')\": '$REPO_DIR/.git'"
+    die "git could not update $REPO_DIR (see the message above). If it mentions permissions, files may belong to another user — fix with: sudo find '$REPO_DIR' \\( -path '$REPO_DIR/data' -o -path '$REPO_DIR/upgrade' \\) -prune -o ! -user \"\$(stat -c %U '$REPO_DIR')\" -exec chown \"\$(stat -c %U '$REPO_DIR')\": {} +"
 }
 
 git_pull_branch() {

@@ -88,10 +88,17 @@ echo "${FAKE_UID:-0}"
     "stat": r'''#!/usr/bin/env bash
 if [[ "$*" == *"%u"* ]]; then echo "${FAKE_OWNER_ID:-1000}"; else echo "${FAKE_OWNER:-root}"; fi
 ''',
-    # Reports a stray (wrongly owned) file inside .git when FAKE_STRAY is set.
+    # Reports a stray (wrongly owned) file inside .git when FAKE_STRAY is set, and
+    # one among the app's files (the checkout itself) when FAKE_STRAY_TREE is set.
     "find": r'''#!/usr/bin/env bash
 echo "find $*" >> "$FAKE_LOG"
-[[ -n "${FAKE_STRAY:-}" ]] && echo "$1/FETCH_HEAD"
+if [[ "$1" == */.git ]]; then
+    [[ -n "${FAKE_STRAY:-}" ]] && echo "$1/FETCH_HEAD"
+else
+    [[ -n "${FAKE_STRAY_TREE:-}" && "$*" == *"-print -quit"* ]] && echo "$1/Dockerfile"
+    [[ -n "${FAKE_READONLY_DIR:-}" && "$*" == *"-perm -u=w -print -quit"* ]] && echo "$1/backend"
+    [[ "$*" == *"-exec ch"* && -n "${FAKE_CHOWN_FAIL:-}" ]] && exit 1
+fi
 exit 0
 ''',
     "chown": r'''#!/usr/bin/env bash
@@ -387,6 +394,36 @@ class TestGitOwnershipRepair:
         proc, calls = run_update(tmp_path, git_dir=True, owner="root", fake_stray="1")
         assert not any(c.startswith("chown") for c in calls)
 
+    def test_app_files_owned_by_someone_else_are_handed_back_too(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, fake_stray_tree="1", sudo_user="truenas_admin")
+        assert proc.returncode == 0, proc.stderr
+        [fix] = [c for c in calls if c.startswith("find") and "-exec chown amoote:" in c]
+        assert "/data -o -path" in fix and fix.rstrip().endswith("{} +")      # data/ and upgrade/ skipped
+        assert "/upgrade" in fix and "/.git" in fix
+        first_git = next(i for i, c in enumerate(calls) if c.startswith("sudo"))
+        assert calls.index(fix) < first_git
+        assert "Restoring ownership of the app's files" in proc.stdout
+
+    def test_app_files_already_right_are_left_alone(self, tmp_path):
+        _, calls = run_update(tmp_path, git_dir=True, sudo_user="truenas_admin")
+        assert not any("-exec chown" in c for c in calls)
+
+    def test_folders_the_owner_cannot_write_are_opened_up(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, fake_readonly_dir="1", sudo_user="truenas_admin")
+        assert proc.returncode == 0, proc.stderr
+        [fix] = [c for c in calls if "-exec chmod u+w" in c]
+        assert "-type d" in fix and "/data -o -path" in fix
+        assert "Letting amoote write" in proc.stdout
+
+    def test_writable_folders_are_left_alone(self, tmp_path):
+        _, calls = run_update(tmp_path, git_dir=True, sudo_user="truenas_admin")
+        assert not any("-exec chmod" in c for c in calls)
+
+    def test_failed_app_file_repair_does_not_stop_the_update(self, tmp_path):
+        proc, _ = run_update(tmp_path, git_dir=True, fake_stray_tree="1", fake_chown_fail="1")
+        assert proc.returncode == 0, proc.stderr
+        assert "Could not change ownership" in proc.stdout
+
     def test_failed_repair_does_not_stop_the_update(self, tmp_path):
         proc, calls = run_update(tmp_path, git_dir=True, fake_stray="1", fake_chown_fail="1")
         assert proc.returncode == 0, proc.stderr
@@ -396,7 +433,7 @@ class TestGitOwnershipRepair:
         proc, _ = run_update(tmp_path, fake_https_fail="1", fake_origin_fail="1")
         assert proc.returncode != 0
         out = proc.stdout + proc.stderr
-        assert "git could not update" in out and "chown -R" in out
+        assert "git could not update" in out and "-exec chown" in out and "-prune" in out
 
 
 # ── version pinning and rollback (published image) ────────────────────────────
