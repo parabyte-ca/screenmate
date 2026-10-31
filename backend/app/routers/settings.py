@@ -10,6 +10,7 @@ from ..models import Setting, WatchlistItem
 from ..schemas import DigestTestRequest, TmdbTestRequest, JackettTestRequest, JellyfinTestRequest, PlexTestRequest
 from ..services.indexers.jackett import probe_jackett
 from ..services import tmdb
+from ..services.secret_settings import SERVER_ONLY_KEYS, is_mask, redact, resolve, scrub
 from ..services.qbittorrent import test_connection
 from ..services.scheduler import reschedule_digest, update_interval
 
@@ -77,8 +78,8 @@ DEFAULTS: dict[str, str] = {
     "app_source_url": "https://github.com/parabyte-ca/screenmate",
 }
 
-# Keys stored in the DB but never sent to the frontend
-_PRIVATE_KEYS = {
+# Keys stored in the DB but never sent to the frontend (secrets are masked separately)
+_PRIVATE_KEYS = set(SERVER_ONLY_KEYS) | {
     "session_secret",
     "last_digest_sent_at",
     "update_release_cache",
@@ -110,13 +111,13 @@ def _recheck_movie_posters(db: Session, key: str) -> None:
 
 @router.get("/settings")
 def get_settings(db: Session = Depends(get_db)):
-    return _load_settings(db)
+    return redact(_load_settings(db))
 
 
 @router.put("/settings")
 def update_settings(updates: dict, db: Session = Depends(get_db)):
     for key, value in updates.items():
-        if key in _PRIVATE_KEYS:
+        if key in _PRIVATE_KEYS or is_mask(value):  # the mask means "keep the stored secret"
             continue
         setting = db.query(Setting).filter(Setting.key == key).first()
         str_val = str(value) if value is not None else ""
@@ -126,7 +127,7 @@ def update_settings(updates: dict, db: Session = Depends(get_db)):
             db.add(Setting(key=key, value=str_val))
     db.commit()
 
-    if "tmdb_api_key" in updates:
+    if "tmdb_api_key" in updates and not is_mask(updates["tmdb_api_key"]):
         _recheck_movie_posters(db, str(updates["tmdb_api_key"] or "").strip())
 
     if "scan_interval_minutes" in updates:
@@ -145,12 +146,12 @@ def update_settings(updates: dict, db: Session = Depends(get_db)):
         except Exception:
             pass
 
-    return _load_settings(db)
+    return redact(_load_settings(db))
 
 
 @router.post("/settings/test-tmdb")
-async def test_tmdb(body: TmdbTestRequest):
-    ok, message = await tmdb.check_key(body.api_key.strip())
+async def test_tmdb(body: TmdbTestRequest, db: Session = Depends(get_db)):
+    ok, message = await tmdb.check_key(resolve(db, "tmdb_api_key", body.api_key.strip()))
     return {"ok": ok, "message": message}
 
 
@@ -161,20 +162,25 @@ def test_qbit(db: Session = Depends(get_db)):
 
 
 @router.post("/settings/test-jackett")
-def test_jackett_endpoint(body: JackettTestRequest):
+def test_jackett_endpoint(body: JackettTestRequest, db: Session = Depends(get_db)):
     """Probe a Prowlarr or Jackett instance using the values currently in the form."""
-    if not body.url.strip() or not body.api_key.strip():
+    api_key = resolve(db, "jackett_api_key", body.api_key.strip())
+    if not body.url.strip() or not api_key:
         return {"ok": False, "error": "Enter both the URL and the API key first."}
-    return probe_jackett(body.url.strip(), body.api_key.strip())
+    result = probe_jackett(body.url.strip(), api_key)
+    if isinstance(result.get("error"), str):
+        result["error"] = scrub(result["error"], api_key)
+    return result
 
 
 @router.post("/settings/test-plex")
-async def test_plex(body: PlexTestRequest):
+async def test_plex(body: PlexTestRequest, db: Session = Depends(get_db)):
+    token = resolve(db, "plex_token", body.token)
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(
                 f"{body.url}/library/sections",
-                params={"X-Plex-Token": body.token},
+                params={"X-Plex-Token": token},
             )
             if not resp.is_success:
                 return {"ok": False, "error": f"HTTP {resp.status_code} — check URL and token"}
@@ -194,8 +200,8 @@ async def test_plex(body: PlexTestRequest):
     except ET.ParseError as e:
         return {"ok": False, "error": f"Unexpected response format: {e}"}
     except Exception as e:
-        logger.error("Plex test connection error: %s", e)
-        return {"ok": False, "error": str(e)}
+        logger.error("Plex test connection error: %s", scrub(str(e), token))
+        return {"ok": False, "error": scrub(str(e), token)}
 
 
 @router.post("/settings/test-digest")
@@ -212,7 +218,7 @@ def test_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
         return {"ok": False, "error": "No recipients configured"}
 
     plex_url   = body.plex_url or s.get("plex_url", "")
-    plex_token = body.plex_token or s.get("plex_token", "")
+    plex_token = resolve(db, "plex_token", body.plex_token) or s.get("plex_token", "")
     if not plex_url or not plex_token:
         return {"ok": False, "error": "Plex URL and token are required — fill in the Plex section above"}
 
@@ -225,6 +231,7 @@ def test_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
         x.strip().lower() for x in excluded_raw.replace("\n", ",").split(",") if x.strip()
     )
 
+    smtp_password = resolve(db, "digest_smtp_password", body.digest_smtp_password)
     try:
         sections = fetch_digest_sections(plex_url, plex_token, excluded_libs=excluded_libs)
         now = datetime.now(timezone.utc)
@@ -234,23 +241,25 @@ def test_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
             "host":       smtp_host,
             "port":       body.digest_smtp_port or "587",
             "user":       body.digest_smtp_user,
-            "password":   body.digest_smtp_password,
+            "password":   smtp_password,
             "from_email": body.digest_from_email,
         }
         send_email(smtp_cfg, recipients, html, week_label)
         return {"ok": True, "message": f"Digest sent to {len(recipients)} recipient(s)"}
     except Exception as e:
-        logger.error("test-digest failed: %s", e)
-        return {"ok": False, "error": str(e)}
+        msg = scrub(str(e), plex_token, smtp_password)
+        logger.error("test-digest failed: %s", msg)
+        return {"ok": False, "error": msg}
 
 
 @router.post("/settings/test-jellyfin")
-async def test_jellyfin(body: JellyfinTestRequest):
+async def test_jellyfin(body: JellyfinTestRequest, db: Session = Depends(get_db)):
+    api_key = resolve(db, "jellyfin_api_key", body.api_key)
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(
                 f"{body.url}/System/Info",
-                params={"api_key": body.api_key},
+                params={"api_key": api_key},
             )
             if not resp.is_success:
                 return {"ok": False, "error": f"HTTP {resp.status_code} — check URL and API key"}
@@ -263,5 +272,5 @@ async def test_jellyfin(body: JellyfinTestRequest):
     except httpx.ConnectError:
         return {"ok": False, "error": "Connection refused — check host and port"}
     except Exception as e:
-        logger.error("Jellyfin test connection error: %s", e)
-        return {"ok": False, "error": str(e)}
+        logger.error("Jellyfin test connection error: %s", scrub(str(e), api_key))
+        return {"ok": False, "error": scrub(str(e), api_key)}

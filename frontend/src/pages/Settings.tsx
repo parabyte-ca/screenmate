@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Download, Edit2, FolderOpen, Loader2, Plus, Save, Star, Trash2, Upload } from "lucide-react";
-import { api, type DownloadPath, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
+import { api, SECRET_MASK, type DownloadPath, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
 import ImportPanel from "../components/ImportPanel";
 import MediaSettings from "../components/MediaSettings";
@@ -48,7 +48,9 @@ function Field({ label, hint, type = "text", value, onChange, placeholder, autoC
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={(e) => { if (value === SECRET_MASK) e.target.select(); }}  // typing replaces a saved secret
         placeholder={placeholder}
+        title={value === SECRET_MASK ? "Saved. Type to replace it, or clear the field to remove it." : undefined}
         autoComplete={autoComplete ?? (type === "password" ? "new-password" : undefined)}
         className={FIELD}
       />

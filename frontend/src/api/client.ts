@@ -2,6 +2,9 @@ import { authStore } from "../auth";
 
 const BASE = "/api";
 
+/** What the server sends instead of a stored secret; sending it back keeps the secret. */
+export const SECRET_MASK = "••••••••";
+
 function _authHeader(): Record<string, string> {
   const token = authStore.getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};

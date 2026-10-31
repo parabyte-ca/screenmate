@@ -19,6 +19,9 @@ from .routers import (
 )
 from .services import download_poller, journeys
 from .services import media as media_engine
+from .services.secret_settings import install_log_redaction
+
+install_log_redaction()  # mask tokens and API keys that appear in URLs in any log line
 
 # Keep journeys in step with every Download write, wherever it happens.
 journeys.install_download_hooks()

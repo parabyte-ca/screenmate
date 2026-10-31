@@ -1,5 +1,8 @@
 # Data / DB
 data/
+*.db
+*.db-shm
+*.db-wal
 
 # Python
 __pycache__/
@@ -17,6 +20,8 @@ frontend/dist/
 
 # Env / per-install settings written by setup.sh
 .env
+.env.*
+!.env.example
 docker-compose.override.yml
 docker-compose.override.yml.bak
 upgrade/
@@ -24,6 +29,9 @@ upgrade/
 # OS
 .DS_Store
 Thumbs.db
+
+# Vite dev-server artefacts
+*.timestamp-*.mjs
 
 # Editor
 .vscode/

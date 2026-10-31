@@ -28,7 +28,10 @@ jobs:
         run: pytest -q
 
       - name: Shellcheck
-        run: shellcheck setup.sh update.sh scripts/upgrade-agent.sh
+        run: shellcheck setup.sh update.sh scripts/upgrade-agent.sh scripts/scan-secrets.sh
+
+      - name: Secret scan (source)
+        run: scripts/scan-secrets.sh
 
   frontend:
     runs-on: ubuntu-latest
@@ -48,3 +51,6 @@ jobs:
       - name: Service worker tests
         working-directory: frontend
         run: node --test tests/push-sw.test.mjs
+
+      - name: Secret scan (production bundle)
+        run: scripts/scan-secrets.sh frontend/dist
