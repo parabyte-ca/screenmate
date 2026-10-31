@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, Copy, Download, Edit2, FolderOpen, Loader2, MinusCircle, Plus, Save, Star, Stethoscope, Trash2, Upload, XCircle } from "lucide-react";
-import { api, SECRET_MASK, type DownloadPath, type FolderTest, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
+import { AlertCircle, CheckCircle2, Copy, RefreshCw, Download, Edit2, FolderOpen, Loader2, MinusCircle, Plus, Save, Star, Stethoscope, Trash2, Upload, XCircle } from "lucide-react";
+import { api, SECRET_MASK, type DownloadPath, type FolderSuggestion, type FolderTest, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
 import { PALETTES, useTheme, type Theme } from "../ThemeContext";
 import ImportPanel from "../components/ImportPanel";
@@ -523,6 +523,18 @@ export default function Settings() {
   };
   useEffect(() => { load(); }, []);
 
+  // Folders qBittorrent already uses, offered for one-click adding (loaded on its own,
+  // so a slow or missing qBittorrent never holds up the page).
+  const [qbFolders, setQbFolders] = useState<FolderSuggestion[]>([]);
+  const [qbChecking, setQbChecking] = useState(false);
+  const loadQbFolders = async () => {
+    setQbChecking(true);
+    try { setQbFolders((await api.paths.suggestions()).suggestions); }
+    catch { setQbFolders([]); }
+    finally { setQbChecking(false); }
+  };
+  useEffect(() => { loadQbFolders(); }, []);
+
   const fetchHealth = async () => {
     try {
       const res = await fetch("/health");
@@ -739,9 +751,23 @@ export default function Settings() {
     if (saved) testFolder(saved.id);   // show straight away whether ScreenMate can use it
   };
 
+  const addQbFolder = async (f: FolderSuggestion) => {
+    const saved = await api.paths.create({
+      name: f.name,
+      path: f.path,
+      local_path: f.visible_here && f.local !== f.path ? f.local : null,
+      downloads: true,
+      scan: f.visible_here,
+      is_default: paths.every((p) => !p.downloads),
+    });
+    setQbFolders((list) => list.filter((x) => x.path !== f.path));
+    await load();
+    testFolder(saved.id);
+  };
+
   const handlePathDelete = async (id: number) => {
     if (!confirm("Remove this folder?")) return;
-    await api.paths.delete(id); load();
+    await api.paths.delete(id); load(); loadQbFolders();
   };
 
   if (loading) return (
@@ -824,6 +850,40 @@ export default function Settings() {
               Add folder
             </button>
           </div>
+          {qbFolders.length > 0 && (
+            <div className="mb-4 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/20 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Found in qBittorrent</p>
+                <button onClick={loadQbFolders} disabled={qbChecking} aria-label="Look again"
+                        className="rounded-lg p-1 text-gray-500 hover:bg-white dark:hover:bg-gray-800 disabled:opacity-50">
+                  <RefreshCw className={`h-3.5 w-3.5 ${qbChecking ? "animate-spin" : ""}`} />
+                </button>
+              </div>
+              <p className="mb-2 text-xs text-gray-600 dark:text-gray-400">Folders qBittorrent saves into that aren't in this list yet.</p>
+              <ul className="space-y-2">
+                {qbFolders.map((f) => (
+                  <li key={f.path} className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-mono text-xs text-gray-900 dark:text-gray-100" title={f.path}>{f.path}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{f.why.join(" · ")}</p>
+                      {f.visible_here ? (
+                        <p className="truncate text-xs text-green-700 dark:text-green-400" title={f.local}>
+                          {f.how === "same path" ? "ScreenMate sees it too" : `ScreenMate sees it at ${f.local}`}
+                          {f.how === "found by name" && " (found by its folder name)"}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-amber-700 dark:text-amber-400">ScreenMate can't see it yet: it will take downloads, and Test shows how to mount it</p>
+                      )}
+                    </div>
+                    <button onClick={() => addQbFolder(f)}
+                            className="flex shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700">
+                      <Plus className="h-3.5 w-3.5" />Add
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {paths.length === 0 ? (
             <div className="rounded-lg border-2 border-dashed border-gray-200 dark:border-gray-700 py-8 text-center text-sm text-gray-400 dark:text-gray-600">
               <FolderOpen className="mx-auto mb-2 h-8 w-8 opacity-40" />

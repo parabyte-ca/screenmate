@@ -145,6 +145,47 @@ def directory_exists(path: str) -> bool | None:
         return False if getattr(e, "http_status_code", None) in (400, 404, 409) else None
 
 
+def known_folders(max_torrent_folders: int = 10) -> list[dict] | None:
+    """The folders qBittorrent saves into: its default save path, each category's
+    save path, and the folders its torrents are in (most used first).
+    Returns [{"path", "why", "category"}], or None when qBittorrent can't be reached."""
+    try:
+        client = _get_client()
+    except Exception:
+        return None
+    found: dict[str, dict] = {}
+
+    def note(path, why, category=None):
+        path = (path or "").strip().rstrip("/")
+        if not path:
+            return
+        entry = found.setdefault(path, {"path": path, "why": [], "category": category})
+        if why not in entry["why"]:
+            entry["why"].append(why)
+        entry["category"] = entry["category"] or category
+
+    try:
+        note(client.app_preferences().get("save_path"), "qBittorrent's default save folder")
+    except Exception:
+        pass
+    try:
+        for name, cat in (client.torrents_categories() or {}).items():
+            note((cat or {}).get("savePath") or (cat or {}).get("save_path"), f"category “{name}”", name)
+    except Exception:
+        pass
+    try:
+        counts: dict[str, int] = {}
+        for t in client.torrents_info():
+            sp = (getattr(t, "save_path", "") or "").rstrip("/")
+            if sp:
+                counts[sp] = counts.get(sp, 0) + 1
+        for sp, n in sorted(counts.items(), key=lambda kv: -kv[1])[:max_torrent_folders]:
+            note(sp, f"{n} torrent{'s' if n != 1 else ''} saved here")
+    except Exception:
+        pass
+    return list(found.values())
+
+
 def test_connection() -> tuple[bool, str]:
     try:
         client = _get_client()

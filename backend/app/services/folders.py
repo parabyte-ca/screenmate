@@ -306,3 +306,58 @@ def check(db: Session, dp: DownloadPath, low_threshold: int = 0) -> dict:
 
     ok = not any(c["status"] == "fail" for c in checks)
     return {"ok": ok, "local": local, "checks": checks, "hint": hint}
+
+
+# ── Folders qBittorrent already uses (Settings → Folders → "Found in qBittorrent") ──
+
+COMMON_MOUNTS = ("/media", "/data", "/downloads", "/mnt", "/storage", "/srv")
+
+
+def suggestions(db: Session) -> dict:
+    """qBittorrent's folders that aren't in the list yet, with where each one is
+    inside ScreenMate (through a path mapping, or found by its folder names)."""
+    from . import qbittorrent
+    from .path_suggest import _locate
+    from .pipeline import map_path
+
+    known = qbittorrent.known_folders()
+    if known is None:
+        return {"connected": False, "suggestions": []}
+
+    rows = db.query(DownloadPath).all()
+    listed = {_norm(dp.path) for dp in rows} | {local_of(db, dp) for dp in rows}
+    roots = []
+    for r in [local_of(db, dp) for dp in rows] + list(COMMON_MOUNTS):
+        for cand in (r, os.path.dirname(r.rstrip("/"))):
+            if cand and cand != "/" and os.path.isdir(cand) and cand not in roots:
+                roots.append(cand)
+
+    out = []
+    taken = {dp.name.lower() for dp in rows}
+    for k in known:
+        path = _norm(k["path"])
+        if path in listed:
+            continue
+        local, how = map_path(db, path), "path mapping"
+        if local == path:
+            how = "same path"
+        if not os.path.isdir(local):
+            hit = _locate(path, roots, os.path.isdir)
+            if hit:
+                old, new = hit
+                local, how = _norm(new.rstrip("/") + path[len(old.rstrip("/")):]), "found by name"
+        name = k.get("category") or os.path.basename(path) or path
+        name = name[:1].upper() + name[1:]
+        if name.lower() in taken:   # e.g. a library folder already called Movies
+            name = f"{name} (qBittorrent)"
+        taken.add(name.lower())
+        out.append({
+            "path": path,
+            "name": name,
+            "why": k["why"],
+            "local": local,
+            "visible_here": os.path.isdir(local),
+            "how": how,
+        })
+    out.sort(key=lambda s: (not s["visible_here"], s["path"]))
+    return {"connected": True, "suggestions": out}

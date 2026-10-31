@@ -69,6 +69,12 @@ def _clean(values: dict, current: DownloadPath | None = None) -> dict:
     return values
 
 
+@router.get("/paths/suggestions")
+def path_suggestions(db: Session = Depends(get_db)):
+    """Folders qBittorrent uses that aren't in the list yet (read-only)."""
+    return folders.suggestions(db)
+
+
 @router.post("/paths", response_model=DownloadPathOut, status_code=201)
 def create_path(path: DownloadPathCreate, db: Session = Depends(get_db)):
     values = _clean(path.model_dump())

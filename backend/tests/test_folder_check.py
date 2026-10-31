@@ -175,3 +175,70 @@ def test_qbittorrent_5_reports_missing_folders(monkeypatch):
     monkeypatch.setattr(qbittorrent, "_get_client", lambda: New())
     assert qbittorrent.directory_exists("/downloads") is True
     assert qbittorrent.directory_exists("/nope") is False
+
+
+# ── Folders qBittorrent already uses ──────────────────────────────────────────
+
+def test_qbittorrent_folders_not_in_the_list_are_suggested(client, Session, tmp_path, monkeypatch):
+    nas = tmp_path / "nas"
+    (nas / "tv").mkdir(parents=True)
+    (nas / "movies").mkdir()
+    add(Session, path=str(nas / "tv"), local_path=str(nas / "tv"), downloads=True)
+    monkeypatch.setattr(qbittorrent, "known_folders", lambda: [
+        {"path": str(nas / "tv"), "why": ["qBittorrent's default save folder"], "category": None},  # listed already
+        {"path": "/downloads/movies", "why": ["category “movies”"], "category": "movies"},           # other container
+        {"path": "/elsewhere/nothing", "why": ["3 torrents saved here"], "category": None},
+    ])
+    r = client.get("/api/paths/suggestions").json()
+    assert r["connected"]
+    by_path = {s["path"]: s for s in r["suggestions"]}
+    assert str(nas / "tv") not in by_path
+    movies = by_path["/downloads/movies"]
+    assert movies["name"] == "Movies" and movies["visible_here"] and movies["how"] == "found by name"
+    assert movies["local"] == str(nas / "movies")
+    nothing = by_path["/elsewhere/nothing"]
+    assert not nothing["visible_here"] and nothing["name"] == "Nothing"
+    assert r["suggestions"][0]["path"] == "/downloads/movies"       # visible ones first
+
+
+def test_a_path_mapping_places_a_suggestion(client, Session, tmp_path, monkeypatch):
+    (tmp_path / "dl").mkdir()
+    with Session() as db:
+        db.add(PathMapping(remote_prefix="/downloads", local_prefix=str(tmp_path / "dl")))
+        db.commit()
+    monkeypatch.setattr(qbittorrent, "known_folders",
+                        lambda: [{"path": "/downloads/", "why": ["x"], "category": None}])
+    [s] = client.get("/api/paths/suggestions").json()["suggestions"]
+    assert (s["path"], s["local"], s["how"], s["visible_here"]) == ("/downloads", str(tmp_path / "dl"), "path mapping", True)
+
+
+def test_no_suggestions_without_qbittorrent(client, monkeypatch):
+    monkeypatch.setattr(qbittorrent, "known_folders", lambda: None)
+    assert client.get("/api/paths/suggestions").json() == {"connected": False, "suggestions": []}
+
+
+def test_known_folders_reads_defaults_categories_and_torrents(monkeypatch):
+    class T:
+        def __init__(self, sp):
+            self.save_path = sp
+
+    class Q:
+        def app_preferences(self):
+            return {"save_path": "/downloads/"}
+        def torrents_categories(self):
+            return {"tv": {"savePath": "/downloads/tv"}, "misc": {"savePath": ""}}
+        def torrents_info(self):
+            return [T("/downloads/tv/"), T("/downloads/tv"), T("/other")]
+    monkeypatch.setattr(qbittorrent, "_get_client", lambda: Q())
+    got = {f["path"]: f for f in qbittorrent.known_folders()}
+    assert set(got) == {"/downloads", "/downloads/tv", "/other"}
+    assert got["/downloads/tv"]["category"] == "tv"
+    assert got["/downloads/tv"]["why"] == ["category “tv”", "2 torrents saved here"]
+
+
+def test_a_suggestion_does_not_reuse_a_folders_name(client, Session, tmp_path, monkeypatch):
+    add(Session, name="Movies", path=str(tmp_path), local_path=str(tmp_path))
+    monkeypatch.setattr(qbittorrent, "known_folders",
+                        lambda: [{"path": "/downloads/movies", "why": ["x"], "category": "movies"}])
+    [s] = client.get("/api/paths/suggestions").json()["suggestions"]
+    assert s["name"] == "Movies (qBittorrent)"

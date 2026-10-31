@@ -523,6 +523,15 @@ export interface FolderCheck {
   detail: string;
 }
 
+export interface FolderSuggestion {
+  path: string;          // as qBittorrent sees it
+  name: string;
+  why: string[];
+  local: string;         // where ScreenMate would find it
+  visible_here: boolean;
+  how: "same path" | "path mapping" | "found by name";
+}
+
 export interface FolderTest {
   ok: boolean;
   local: string;
@@ -859,6 +868,8 @@ export const api = {
     delete: (id: number) => req(`/paths/${id}`, { method: "DELETE" }),
     /** Check a folder: visible, readable, writable, free space, and qBittorrent's view. */
     test: (id: number) => req<FolderTest>(`/paths/${id}/test`, { method: "POST" }),
+    /** Folders qBittorrent uses that aren't in the list yet. */
+    suggestions: () => req<{ connected: boolean; suggestions: FolderSuggestion[] }>("/paths/suggestions"),
   },
 
   trakt: {
