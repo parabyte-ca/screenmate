@@ -240,7 +240,20 @@ class TestDeriveUpgradeState:
         assert state == "failed"
         assert msg == "build error"
 
-    def test_status_overrides_request(self, upgrade_dir):
+    def test_running_status_overrides_request(self, upgrade_dir):
+        _write(upgrade_dir, "request.json", {
+            "id": "abc", "version": "2.5.0",
+            "requested_by": "admin",
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+        })
+        _write(upgrade_dir, "status.json", {
+            "state": "running", "started_at": datetime.now(timezone.utc).isoformat()})
+        state, _ = derive_upgrade_state(upgrade_dir)
+        assert state == "running"
+
+    def test_new_request_overrides_a_finished_status(self, upgrade_dir):
+        # The helper deletes request.json before writing any status, so a request
+        # still present is newer than the result of the previous upgrade.
         _write(upgrade_dir, "request.json", {
             "id": "abc", "version": "2.5.0",
             "requested_by": "admin",
@@ -248,7 +261,7 @@ class TestDeriveUpgradeState:
         })
         _write(upgrade_dir, "status.json", {"state": "succeeded"})
         state, _ = derive_upgrade_state(upgrade_dir)
-        assert state == "succeeded"
+        assert state == "requested"
 
 
 # ── Folder file reading (defensive) ──────────────────────────────────────────
@@ -730,3 +743,38 @@ class TestParseGhRepo:
 
     def test_empty_returns_none(self):
         assert parse_gh_repo("") is None
+
+
+# ── Upgrade phase (progress steps) ────────────────────────────────────────────
+
+from app.services.updater import derive_upgrade_phase  # noqa: E402
+
+
+@pytest.mark.parametrize("state,log,phase", [
+    (None, "", None),
+    ("requested", "", "requested"),
+    ("running", "", "started"),
+    ("running", "2026-10-31T14:00:00Z ==> Pulling latest code (branch: main) ...", "downloading"),
+    ("running", "==> Pulling Docker image (v0.10.1) ...\n==> Pinned image version", "downloading"),
+    ("running", "==> Building Docker image ...", "downloading"),
+    ("running", "==> Pulling Docker image ...\n==> Restarting container ...", "restarting"),
+    ("running", "==> Waiting for health check ...", "restarting"),
+    ("succeeded", "==> Deployment complete.", "done"),
+    ("failed", "==> Restarting container ...", "failed"),
+])
+def test_upgrade_phase_follows_the_log(state, log, phase):
+    assert derive_upgrade_phase(state, log) == phase
+
+
+def test_status_reports_the_phase_of_a_running_upgrade(tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_UPGRADE_FOLDER", str(tmp_path))
+    (tmp_path / "status.json").write_text(json.dumps({
+        "state": "running", "started_at": datetime.now(timezone.utc).isoformat()}))
+    (tmp_path / "upgrade.log").write_text("==> Pulling Docker image (v9.9.9) ...\n")
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as db:
+        s = get_status(db)
+    assert s["upgrade_state"] == "running" and s["upgrade_phase"] == "downloading"
+    assert "upgrade_log" not in s
+

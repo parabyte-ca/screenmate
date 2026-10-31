@@ -204,6 +204,11 @@ def derive_upgrade_state(folder: str) -> tuple[Optional[str], Optional[str]]:
     now = datetime.now(timezone.utc)
 
     status = _read_json_file(os.path.join(folder, "status.json"))
+    request = _read_json_file(os.path.join(folder, "request.json"))
+    # The helper deletes request.json when it starts, so a request that is still
+    # there is newer than any finished status.json left from the last upgrade.
+    if request and not (status and status.get("state") == "running"):
+        status = None
     if status:
         state = _cap(status.get("state"), 20)
         msg = _cap(status.get("message"), 300) or None
@@ -215,7 +220,6 @@ def derive_upgrade_state(folder: str) -> tuple[Optional[str], Optional[str]]:
         if state in ("succeeded", "failed"):
             return state, msg
 
-    request = _read_json_file(os.path.join(folder, "request.json"))
     if request:
         requested_at = _parse_ts(request.get("requested_at"))
         if requested_at and (now - requested_at).total_seconds() > 3600:
@@ -223,6 +227,34 @@ def derive_upgrade_state(folder: str) -> tuple[Optional[str], Optional[str]]:
         return "requested", None
 
     return None, None
+
+
+# update.sh announces each stage with an "==> …" line in upgrade.log.
+_PHASE_MARKERS = (
+    ("restarting", ("==> Restarting container", "==> Waiting for health check")),
+    ("downloading", ("==> Pulling Docker image", "==> Pulling latest Docker image",
+                     "==> Building Docker image", "==> Pulling latest code",
+                     "==> Checking out tag/version")),
+)
+
+
+def derive_upgrade_phase(state: Optional[str], log: str) -> Optional[str]:
+    """Where an upgrade has got to, for the progress steps on the Updates page.
+
+    One of: None, "requested", "started", "downloading", "restarting",
+    "done", "failed". Only "running" looks at the log; the furthest stage
+    named there wins.
+    """
+    if state in (None, "requested"):
+        return state
+    if state == "succeeded":
+        return "done"
+    if state == "failed":
+        return "failed"
+    for phase, markers in _PHASE_MARKERS:
+        if any(m in log for m in markers):
+            return phase
+    return "started"
 
 
 # ── Rate limit for "check now" ────────────────────────────────────────────────
@@ -340,8 +372,10 @@ def get_status(db, *, include_log: bool = False) -> dict:
         "helper_install_cmd": "sudo bash scripts/upgrade-agent.sh --install",
     }
 
+    log = _read_log_tail(folder) if upgrade_state == "running" or include_log else ""
+    result["upgrade_phase"] = derive_upgrade_phase(upgrade_state, log)
     if include_log:
-        result["upgrade_log"] = _read_log_tail(folder)
+        result["upgrade_log"] = log
 
     return result
 

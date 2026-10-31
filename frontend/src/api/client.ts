@@ -25,7 +25,12 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error("Session expired. Please log in.");
   }
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+    // A proxy in front of ScreenMate answers with HTML while the container restarts.
+    const err = await res.json().catch(() => ({
+      detail: res.status >= 502 && res.status <= 504
+        ? `ScreenMate isn't responding (HTTP ${res.status}). It may be restarting.`
+        : `Request failed (HTTP ${res.status}).`,
+    }));
     throw new Error(err.detail ?? err.msg ?? "Request failed");
   }
   return res.json() as Promise<T>;
@@ -347,6 +352,8 @@ export interface HelperInfo {
   busy?: boolean;
 }
 
+export type UpgradePhase = "requested" | "started" | "downloading" | "restarting" | "done" | "failed";
+
 export interface UpdateStatus {
   current_version: string;
   latest_release: LatestRelease | null;
@@ -356,6 +363,8 @@ export interface UpdateStatus {
   helper: HelperInfo;
   upgrade_state: "requested" | "running" | "succeeded" | "failed" | null;
   upgrade_message: string | null;
+  /** How far a running upgrade has got (from the helper's log). */
+  upgrade_phase: UpgradePhase | null;
   can_upgrade: boolean;
   previous_version: string | null;
   can_rollback: boolean;
