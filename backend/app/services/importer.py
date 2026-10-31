@@ -35,6 +35,14 @@ FILESPLITTER_TABLES = ("files", "jobs", "settings")
 
 # Never copied: they belong to this install.
 SKIP_SETTINGS = {"session_secret", "secret_key"}
+# AuTorrent settings are copied only when ScreenMate has the same setting (its
+# defaults list), minus ones that describe AuTorrent itself rather than your
+# preferences. Version, update and upgrade state, caches and "last run" markers
+# are not settings ScreenMate knows, so they never come across.
+AUTORRENT_NEVER = {
+    "app_source_url",   # AuTorrent's repo: ScreenMate would check the wrong releases
+    "qbit_category",    # keep ScreenMate's own label, so the two apps' torrents stay apart
+}
 # FileSplitter settings that ScreenMate keeps under the same key.
 FS_SETTING_KEYS = {
     "scene_threshold", "min_scene_duration", "scene_method", "x265_crf", "x265_preset",
@@ -117,6 +125,18 @@ def _count(con, table: str, where: str = "") -> int:
         return 0
 
 
+def _importable_settings(con: sqlite3.Connection, kind: str) -> int:
+    """How many of the upload's settings would be imported (not its version or update state)."""
+    try:
+        keys = {r[0] for r in con.execute("SELECT key FROM settings")}
+    except sqlite3.DatabaseError:
+        return 0
+    if kind == "filesplitter":
+        return len(keys & FS_SETTING_KEYS)
+    from ..routers.settings import DEFAULTS
+    return len({k for k in keys if k in DEFAULTS and k not in AUTORRENT_NEVER} - SKIP_SETTINGS)
+
+
 def inspect_upload(token: str) -> dict:
     """What's in an uploaded database, without changing anything."""
     path = upload_path(token)
@@ -131,14 +151,14 @@ def inspect_upload(token: str) -> dict:
                 "history": _count(con, "download_history"),
                 "folders": _count(con, "download_paths"),
                 "profiles": _count(con, "quality_profiles"),
-                "settings": _count(con, "settings"),
+                "settings": _importable_settings(con, "autorrent"),
             }
             sample = []
         else:
             counts = {
                 "files": _count(con, "files"),
                 "jobs": _count(con, "jobs"),
-                "settings": _count(con, "settings"),
+                "settings": _importable_settings(con, "filesplitter"),
             }
             row = con.execute("SELECT value FROM settings WHERE key='total_saved_bytes'").fetchone()
             counts["saved_bytes"] = int(row[0]) if row and str(row[0]).isdigit() else 0
@@ -169,13 +189,36 @@ def _insert(db: Session, table: str, row: dict, columns: list[str]) -> int:
     return db.execute(text(f"INSERT INTO {table} ({cols}) VALUES ({params})"), data).lastrowid
 
 
-def _merge_settings(db: Session, rows: list[tuple[str, str]], overwrite: bool) -> int:
+def _autorrent_settings(rows: list[tuple[str, str]], profile_map: dict[int, int]) -> list[tuple[str, str]]:
+    """The AuTorrent settings worth keeping, with IDs pointed at the imported rows."""
+    from ..routers.settings import DEFAULTS
+
+    keep = []
+    for key, value in rows:
+        if key not in DEFAULTS or key in AUTORRENT_NEVER:
+            continue
+        if key == "default_profile_id":
+            try:
+                value = str(profile_map[int(value)])
+            except (TypeError, ValueError, KeyError):
+                continue  # no such profile came across
+        keep.append((key, value))
+    return keep
+
+
+def _merge_settings(db: Session, rows: list[tuple[str, str]], overwrite: bool,
+                    choices: dict[str, bool] | None = None) -> int:
+    """Copy settings in. `choices` (from the comparison) says per key whether to take
+    the imported value; keys it doesn't mention follow `overwrite` (fill blanks only)."""
     changed = 0
     for key, value in rows:
         if key in SKIP_SETTINGS or value is None:
             continue
         cur = db.execute(text("SELECT value FROM settings WHERE key=:k"), {"k": key}).first()
-        if cur is not None and cur[0] not in (None, "") and not overwrite:
+        if choices is not None and key in choices:
+            if not choices[key]:
+                continue
+        elif cur is not None and cur[0] not in (None, "") and not overwrite:
             continue
         db.execute(text("INSERT INTO settings (key, value) VALUES (:k, :v) "
                         "ON CONFLICT(key) DO UPDATE SET value=excluded.value"), {"k": key, "v": value})
@@ -202,7 +245,8 @@ def backup_current(db_path: str | None) -> str | None:
 
 # ── AuTorrent ─────────────────────────────────────────────────────────────────
 
-def _import_autorrent(db: Session, path: str, overwrite_settings: bool) -> dict:
+def _import_autorrent(db: Session, path: str, overwrite_settings: bool,
+                      choices: dict[str, bool] | None = None) -> dict:
     from ..migrations import run_migrations
 
     work = path + ".work"
@@ -309,7 +353,8 @@ def _import_autorrent(db: Session, path: str, overwrite_settings: bool) -> dict:
 
         with src.connect() as c:
             settings = [(k, v) for k, v in c.execute(text("SELECT key, value FROM settings"))]
-        report["settings"] = _merge_settings(db, settings, overwrite_settings)
+        report["settings"] = _merge_settings(db, _autorrent_settings(settings, profile_map),
+                                             overwrite_settings, choices)
         return report
     finally:
         src.dispose()
@@ -331,7 +376,7 @@ def _rewrite(path: str, rewrite: tuple[str, str] | None) -> str:
 
 
 def _import_filesplitter(db: Session, path: str, overwrite_settings: bool,
-                         rewrite: tuple[str, str] | None) -> dict:
+                         rewrite: tuple[str, str] | None, choices: dict[str, bool] | None = None) -> dict:
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     try:
@@ -366,7 +411,7 @@ def _import_filesplitter(db: Session, path: str, overwrite_settings: bool,
 
         settings = [(r["key"], r["value"]) for r in con.execute("SELECT key, value FROM settings")
                     if r["key"] in FS_SETTING_KEYS]
-        changed = _merge_settings(db, settings, overwrite_settings)
+        changed = _merge_settings(db, settings, overwrite_settings, choices)
 
         saved = con.execute("SELECT value FROM settings WHERE key='total_saved_bytes'").fetchone()
         saved_bytes = int(saved[0]) if saved and str(saved[0]).isdigit() else 0
@@ -383,8 +428,121 @@ def _import_filesplitter(db: Session, path: str, overwrite_settings: bool,
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 
+SETTING_LABELS = {
+    "qbit_host": "qBittorrent host", "qbit_port": "qBittorrent port", "qbit_username": "qBittorrent user",
+    "qbit_password": "qBittorrent password", "scan_interval_minutes": "Watchlist scan every (minutes)",
+    "min_seeds": "Minimum seeders", "remove_on_complete": "Remove finished torrents",
+    "jackett_url": "Prowlarr / Jackett URL", "jackett_api_key": "Prowlarr / Jackett API key",
+    "apprise_url": "Apprise URL", "tmdb_api_key": "TMDB API key", "default_profile_id": "Default quality profile",
+    "default_indexer": "Default search source", "browse_country": "Browse country",
+    "trakt_client_id": "Trakt client ID", "trakt_username": "Trakt username",
+    "plex_url": "Plex URL", "plex_token": "Plex token", "jellyfin_url": "Jellyfin URL",
+    "jellyfin_api_key": "Jellyfin API key", "digest_smtp_password": "Digest email password",
+    "ui_password": "Login password", "stall_hours": "Stalled after (hours)",
+    "x265_crf": "x265 quality (CRF)", "x265_preset": "x265 preset", "target_resolution": "Target resolution",
+    "encoder_backend": "Encoder", "max_workers": "Simultaneous jobs", "ffprobe_timeout": "ffprobe timeout (s)",
+    "scene_threshold": "Scene threshold", "scene_method": "Scene method", "split_keywords": "Split keywords",
+}
+
+
+def _profile_names(con) -> dict[str, str]:
+    try:
+        return {str(i): n for i, n in con.execute("SELECT id, name FROM quality_profiles")}
+    except sqlite3.DatabaseError:
+        return {}
+
+
+def compare_settings(bind, tokens: list[str]) -> dict:
+    """Every importable setting whose value differs from what this install uses now.
+
+    `import_by_default` mirrors what Import does with no choices: fill a setting
+    you haven't set, keep one you have. Secrets are never shown, only whether they differ.
+    """
+    from ..routers.settings import DEFAULTS
+    from .media import config as media_config
+    from .secret_settings import MASK, SECRET_KEYS
+
+    with Session(bind=bind) as db:
+        current = {k: v for k, v in db.execute(text("SELECT key, value FROM settings"))}
+        here_profiles = {str(i): n for i, n in db.execute(text("SELECT id, name FROM quality_profiles"))}
+
+    def effective(key: str) -> tuple[str, bool]:
+        """(value in use here, whether you set it yourself)."""
+        if current.get(key) not in (None, ""):
+            return str(current[key]), True
+        if key in DEFAULTS:
+            return DEFAULTS[key], False
+        attr = media_config.SETTINGS_MAP.get(key, (None,))[0]
+        value = getattr(media_config, attr, "") if attr else ""
+        return (",".join(map(str, value)) if isinstance(value, list) else str(value)), False
+
+    secret = SECRET_KEYS | {"tpdb_api_key"}
+    rows, same = [], 0
+    for token in tokens:
+        path = upload_path(token)
+        kind = detect_kind(path)
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            raw = [(k, v) for k, v in con.execute("SELECT key, value FROM settings") if v is not None]
+            names = _profile_names(con)
+        finally:
+            con.close()
+        if kind == "autorrent":
+            incoming = [(k, v) for k, v in raw if k in DEFAULTS and k not in AUTORRENT_NEVER and k not in SKIP_SETTINGS]
+        else:
+            incoming = [(k, v) for k, v in raw if k in FS_SETTING_KEYS]
+        for key, value in incoming:
+            here, set_here = effective(key)
+            value = str(value)
+            if key == "default_profile_id":  # IDs differ between installs: compare by name
+                here, value = here_profiles.get(here, ""), names.get(value, "")
+                if not value:
+                    continue
+            if value.strip().lower() == here.strip().lower():
+                same += 1
+                continue
+            hidden = key in secret
+            rows.append({
+                "key": key, "source": kind,
+                "label": SETTING_LABELS.get(key) or key.replace("_", " ").capitalize(),
+                "here": (MASK if here else "") if hidden else here,
+                "incoming": MASK if hidden else value,
+                "secret": hidden,
+                "set_here": set_here,
+                "import_by_default": not set_here,
+            })
+    rows.sort(key=lambda r: (r["source"], r["key"]))
+    return {"differences": rows, "same": same}
+
+
+def suggest_paths(bind, tokens: list[str]) -> dict:
+    """Recommended folder change for FileSplitter's files and path mappings for qBittorrent."""
+    from . import path_suggest
+    from .media import config as media_config
+
+    by_kind = {detect_kind(upload_path(t)): upload_path(t) for t in tokens}
+    with Session(bind=bind) as db:
+        existing = [(r[0], r[1]) for r in db.execute(text("SELECT remote_prefix, local_prefix FROM path_mappings"))]
+    return path_suggest.suggest(by_kind.get("autorrent"), by_kind.get("filesplitter"),
+                                list(media_config.MEDIA_PATHS), existing)
+
+
+def _add_mappings(db: Session, mappings: list[tuple[str, str]]) -> int:
+    added = 0
+    for remote, local in mappings:
+        remote, local = remote.rstrip("/") or "/", local.rstrip("/") or "/"
+        if db.execute(text("SELECT 1 FROM path_mappings WHERE remote_prefix IN (:r, :rs)"),
+                      {"r": remote, "rs": remote + "/"}).first():
+            continue  # never replace a mapping you set yourself
+        db.execute(text("INSERT INTO path_mappings (remote_prefix, local_prefix) VALUES (:r, :l)"),
+                   {"r": remote, "l": local})
+        added += 1
+    return added
+
+
 def run(bind, tokens: list[str], overwrite_settings: bool = False,
-        rewrite: tuple[str, str] | None = None, db_path: str | None = None) -> dict:
+        rewrite: tuple[str, str] | None = None, db_path: str | None = None,
+        mappings: list[tuple[str, str]] = (), choices: dict[str, bool] | None = None) -> dict:
     """Import every uploaded database in one transaction. Returns a report per file."""
     uploads = [(t, upload_path(t)) for t in tokens]
     kinds = [(t, p, detect_kind(p)) for t, p in uploads]
@@ -398,10 +556,11 @@ def run(bind, tokens: list[str], overwrite_settings: bool = False,
             # AuTorrent first, so its settings land before FileSplitter's encoder ones.
             for token, path, kind in sorted(kinds, key=lambda x: x[2] != "autorrent"):
                 if kind == "autorrent":
-                    report = _import_autorrent(db, path, overwrite_settings)
+                    report = _import_autorrent(db, path, overwrite_settings, choices)
                 else:
-                    report = _import_filesplitter(db, path, overwrite_settings, rewrite)
+                    report = _import_filesplitter(db, path, overwrite_settings, rewrite, choices)
                 results.append({"token": token, "kind": kind, "imported": report})
+            added_mappings = _add_mappings(db, list(mappings))
             db.commit()
         except Exception:
             db.rollback()
@@ -413,7 +572,7 @@ def run(bind, tokens: list[str], overwrite_settings: bool = False,
         except OSError:
             pass
     _after_import(bind)
-    return {"ok": True, "backup": backup, "results": results}
+    return {"ok": True, "backup": backup, "results": results, "mappings_added": added_mappings}
 
 
 def _after_import(bind) -> None:
