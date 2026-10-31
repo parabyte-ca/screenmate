@@ -30,7 +30,7 @@ Status as of v0.8.1: **every item is present**. One FileSplitter bug was found a
 | Setup wizard (now with import) | First run | `test_trakt_onboarding.py`, `test_importer.py` |
 | Backup and restore | Settings → Data management | `test_backup.py`; Smoke (backup downloads) |
 | `/health` | `GET /health` | `test_health.py`; Smoke |
-| Themes and collapsible sidebar | Sidebar footer, sidebar header | Smoke (theme buttons, collapse/expand) |
+| Themes and collapsible sidebar (+ five colour themes) | Sidebar footer, Settings → Appearance, Ctrl+K | Smoke (theme buttons, collapse/expand) |
 | Updates page and upgrade helper | Updates page (phones: More → Updates) | `test_updates.py`, `test_update_script.py`, `test_next_version.py`; Smoke |
 
 ## FileSplitter

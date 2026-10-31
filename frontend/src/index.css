@@ -1,3 +1,4 @@
+@import "./themes.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -20,12 +21,12 @@
 
 /* Chart tokens (dataviz reference palette, validated on these surfaces). */
 :root {
-  --viz-series-1: #2a78d6;
-  --viz-grid: #e5e7eb;
-  --viz-hover: rgba(42, 120, 214, 0.08);
+  --viz-series-1: rgb(var(--blue-600));  /* follows the colour theme */
+  --viz-grid: rgb(var(--gray-200));
+  --viz-hover: rgb(var(--blue-600) / 0.08);
 }
 html.dark {
-  --viz-series-1: #3987e5;
-  --viz-grid: #1f2937;
-  --viz-hover: rgba(57, 135, 229, 0.12);
+  --viz-series-1: rgb(var(--blue-400));
+  --viz-grid: rgb(var(--gray-800));
+  --viz-hover: rgb(var(--blue-400) / 0.12);
 }

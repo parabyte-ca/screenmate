@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Download, Edit2, FolderOpen, Loader2, Plus, Save, Star, Trash2, Upload } from "lucide-react";
 import { api, SECRET_MASK, type DownloadPath, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
+import { PALETTES, useTheme, type Theme } from "../ThemeContext";
 import ImportPanel from "../components/ImportPanel";
 import MediaSettings from "../components/MediaSettings";
 import PipelineSettings from "../components/PipelineSettings";
@@ -163,6 +164,45 @@ function PathModal({ initial, onClose, onSave }: {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Colour theme and light/dark, saved on this device. */
+function AppearanceSection() {
+  const { theme, setTheme, palette, setPalette } = useTheme();
+  const modes: { id: Theme; label: string }[] = [
+    { id: "light", label: "Light" }, { id: "dark", label: "Dark" }, { id: "system", label: "Match my device" },
+  ];
+  return (
+    <Section title="Appearance">
+      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+        Saved on this device. Every colour theme has a light and a dark version.
+      </p>
+      <div className="mb-4 inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5" role="radiogroup" aria-label="Light or dark">
+        {modes.map((m) => (
+          <button key={m.id} role="radio" aria-checked={theme === m.id} onClick={() => setTheme(m.id)}
+                  className={`rounded-md px-3 py-1.5 text-sm ${theme === m.id
+                    ? "bg-blue-600 text-white"
+                    : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}>
+            {m.label}
+          </button>
+        ))}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" role="radiogroup" aria-label="Colour theme">
+        {PALETTES.map((p) => (
+          <button key={p.id} role="radio" aria-checked={palette === p.id} onClick={() => setPalette(p.id)}
+                  className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left ${palette === p.id
+                    ? "border-blue-600 ring-1 ring-blue-600 bg-blue-50 dark:bg-blue-950/40"
+                    : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"}`}>
+            <span className="h-6 w-6 shrink-0 rounded-full border border-black/10 dark:border-white/20" style={{ background: p.swatch }} />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-gray-900 dark:text-gray-100">{p.name}</span>
+              <span className="block text-xs text-gray-500 dark:text-gray-400">{p.note}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </Section>
   );
 }
 
@@ -1312,6 +1352,9 @@ export default function Settings() {
             )}
           </div>
         </Section>
+
+        {/* Appearance */}
+        <AppearanceSection />
 
         {/* Security */}
         <Section title="Security">

@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Activity, ArrowUpCircle, CalendarDays, Clock, Compass, CornerDownLeft, Film, FolderSearch, Monitor, Moon,
-  Pause, Play, Radar, Search, Settings, Sun, Trash2, TrendingUp, Tv, type LucideIcon,
+  Palette, Pause, Play, Radar, Search, Settings, Sun, Trash2, TrendingUp, Tv, type LucideIcon,
 } from "lucide-react";
 import { api, type Journey, type MediaFile, type WatchlistItem } from "../api/client";
-import { useTheme } from "../ThemeContext";
+import { PALETTES, useTheme } from "../ThemeContext";
 
 // Ctrl/⌘+K (or "/") opens a palette that finds pages, actions, shows, library
 // files and recent activity. "g" then a letter jumps straight to a page.
@@ -63,7 +63,7 @@ function isTyping(e: KeyboardEvent) {
 
 export default function CommandPalette() {
   const navigate = useNavigate();
-  const { setTheme } = useTheme();
+  const { setTheme, setPalette } = useTheme();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
@@ -150,6 +150,10 @@ export default function CommandPalette() {
       { id: "theme-dark", group: "Actions", label: "Dark theme", icon: Moon, keywords: "appearance", run: () => setTheme("dark") },
       { id: "theme-light", group: "Actions", label: "Light theme", icon: Sun, keywords: "appearance", run: () => setTheme("light") },
       { id: "theme-system", group: "Actions", label: "Theme: follow the system", icon: Monitor, keywords: "appearance", run: () => setTheme("system") },
+      ...PALETTES.map((p) => ({
+        id: `palette-${p.id}`, group: "Actions", label: `Colour theme: ${p.name}`, icon: Palette,
+        keywords: `appearance colour color theme ${p.note}`, run: () => setPalette(p.id),
+      })),
     );
     if (query.length >= 2) {
       for (const s of shows) {
@@ -167,7 +171,7 @@ export default function CommandPalette() {
       }
     }
     return list;
-  }, [q, shows, files, journeys, paused, navigate, setTheme]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [q, shows, files, journeys, paused, navigate, setTheme, setPalette]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const results = useMemo(() => {
     const query = q.trim();
