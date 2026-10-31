@@ -741,6 +741,24 @@ export const api = {
       const q = p.toString();
       return `${BASE}/media/files/${id}/stream${q ? `?${q}` : ""}`;
     },
+    /** A still frame from the file (cached on the server). `v` busts the browser cache when the file changes. */
+    thumbUrl: (id: number, v?: string | null) => {
+      const p = new URLSearchParams();
+      const token = authStore.getToken();
+      if (token) p.set("token", token);
+      if (v) p.set("v", v);
+      const q = p.toString();
+      return `${BASE}/media/files/${id}/thumb${q ? `?${q}` : ""}`;
+    },
+    /** The file converted on the fly to MP4 any browser plays, from `start` seconds. */
+    playUrl: (id: number, start = 0) => {
+      const p = new URLSearchParams();
+      const token = authStore.getToken();
+      if (token) p.set("token", token);
+      if (start > 0) p.set("start", String(Math.floor(start)));
+      const q = p.toString();
+      return `${BASE}/media/files/${id}/play${q ? `?${q}` : ""}`;
+    },
     settings: () => req<MediaSettings>("/media/settings"),
     saveSettings: (data: Record<string, unknown>) =>
       req<MediaResult & { rejected?: string[] }>("/media/settings", { method: "POST", body: JSON.stringify(data) }),
