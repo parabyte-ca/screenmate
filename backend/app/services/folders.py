@@ -13,6 +13,8 @@ upgrade, and ``adopt_env()`` picks up folders added later with setup.sh --media.
 """
 import logging
 import os
+import shutil
+import uuid
 
 from sqlalchemy.orm import Session
 
@@ -168,3 +170,194 @@ def startup(db: Session) -> list[str]:
     merge_once(db)
     adopt_env(db)
     return refresh(db)
+
+
+# ── Folder test (Settings → Folders → Test) ───────────────────────────────────
+
+_SCAN_CAP = 5000
+
+
+def _source(db: Session, dp: DownloadPath) -> str:
+    """Where ScreenMate's path for this folder comes from, in words."""
+    if dp.local_path:
+        return "set as Path here"
+    from ..models import PathMapping
+    from .pipeline import map_path
+    mapped = map_path(db, dp.path)
+    if mapped != dp.path:
+        for m in db.query(PathMapping).all():
+            remote = m.remote_prefix.rstrip("/")
+            if dp.path == remote or dp.path.startswith(remote + "/"):
+                return f"from the path mapping {m.remote_prefix} → {m.local_prefix}"
+    return "the same path qBittorrent uses"
+
+
+def _nearest_existing(path: str) -> str:
+    parent = path
+    while parent and parent != "/" and not os.path.isdir(parent):
+        parent = os.path.dirname(parent.rstrip("/")) or "/"
+    return parent or "/"
+
+
+def _count_videos(root: str) -> tuple[int, bool]:
+    """Videos in the folder and one level down; True when the count stopped at the cap."""
+    from .media import config
+    exts = config.VIDEO_EXTENSIONS
+    found = seen = 0
+    stack = [(root, 0)]
+    while stack:
+        here, depth = stack.pop()
+        try:
+            with os.scandir(here) as it:
+                for e in it:
+                    seen += 1
+                    if seen > _SCAN_CAP:
+                        return found, True
+                    if e.name.startswith("."):
+                        continue
+                    if e.is_dir(follow_symlinks=False):
+                        if depth < 1:
+                            stack.append((e.path, depth + 1))
+                    elif os.path.splitext(e.name)[1].lower() in exts:
+                        found += 1
+        except OSError:
+            if here == root:
+                raise
+    return found, False
+
+
+def check(db: Session, dp: DownloadPath, low_threshold: int = 0) -> dict:
+    """Can ScreenMate (and qBittorrent) use this folder? A checklist plus the likeliest fix."""
+    from .disk_space import is_low
+
+    local = local_of(db, dp)
+    checks: list[dict] = []
+    hint = None
+
+    def add(key, label, status, detail):
+        checks.append({"key": key, "label": label, "status": status, "detail": detail})
+
+    add("path", "Path here", "ok", f"{local or '(none)'}, {_source(db, dp)}")
+
+    visible = bool(local) and os.path.isdir(local)
+    if not visible:
+        parent = _nearest_existing(local or "/")
+        add("visible", "Visible to ScreenMate", "fail",
+            f"{local} doesn't exist in ScreenMate's container"
+            + (f"; {parent} does" if parent not in ("/", "") else ""))
+        mapped = _source(db, dp).startswith("from the path mapping")
+        hint = ({"kind": "mapping",
+                 "text": f"Check the path mapping: it turns {dp.path} into {local}, which doesn't exist here."}
+                if mapped else
+                {"kind": "mount",
+                 "text": "Mount the folder into ScreenMate: add this under volumes in docker-compose.override.yml, "
+                         "replacing the left side with the folder's path on the host, then run: docker compose up -d",
+                 "copy": f"- /path/on/host:{local}"})
+        for key, label in (("read", "Readable"), ("write", "Writable"), ("space", "Free space")):
+            add(key, label, "skip", "Not checked: the folder isn't visible")
+    else:
+        add("visible", "Visible to ScreenMate", "ok", "Found")
+        try:
+            n, capped = _count_videos(local)
+            add("read", "Readable", "ok",
+                f"{n}{'+' if capped else ''} video{'s' if n != 1 else ''} in the folder and one level down")
+        except OSError as e:
+            add("read", "Readable", "fail", f"Can't list it: {e.strerror or e}")
+            hint = hint or {"kind": "permissions",
+                            "text": f"ScreenMate runs as user {os.getuid()}; give that user read access on the host."}
+
+        probe = os.path.join(local, f".screenmate-write-test-{uuid.uuid4().hex[:8]}")
+        try:
+            with open(probe, "w") as f:
+                f.write("ok")
+            os.remove(probe)
+            add("write", "Writable", "ok", "ScreenMate can create and delete files here")
+        except OSError as e:
+            needs = dp.scan or dp.downloads
+            add("write", "Writable", "fail" if needs else "warn",
+                f"Read-only ({e.strerror or e})"
+                + (": encode, split, trim and trash need to write here" if dp.scan
+                   else ": previews work, but nothing can be changed"))
+            hint = hint or {"kind": "permissions",
+                            "text": f"Remove ':ro' from this folder's volume in docker-compose.override.yml, or give "
+                                    f"user {os.getuid()} write access on the host."}
+
+        try:
+            usage = shutil.disk_usage(local)
+            low = is_low(usage.free, low_threshold)
+            add("space", "Free space", "warn" if low else "ok",
+                f"{usage.free / 1e9:.1f} GB free of {usage.total / 1e9:.1f} GB" + (" (low)" if low else ""))
+        except OSError as e:
+            add("space", "Free space", "skip", f"Unknown ({e.strerror or e})")
+
+    if dp.downloads:
+        from . import qbittorrent
+        seen = qbittorrent.directory_exists(dp.path)
+        if seen is True:
+            add("qbit", "qBittorrent sees it", "ok", f"qBittorrent can open {dp.path}")
+        elif seen is False:
+            add("qbit", "qBittorrent sees it", "fail", f"qBittorrent can't find {dp.path}")
+            hint = hint or {"kind": "qbit",
+                            "text": "Use the path exactly as qBittorrent sees it (its container's path), "
+                                    "or mount the folder into qBittorrent."}
+        else:
+            add("qbit", "qBittorrent sees it", "skip",
+                "Couldn't ask qBittorrent (not connected, or version 4.x, which has no way to check)")
+
+    ok = not any(c["status"] == "fail" for c in checks)
+    return {"ok": ok, "local": local, "checks": checks, "hint": hint}
+
+
+# ── Folders qBittorrent already uses (Settings → Folders → "Found in qBittorrent") ──
+
+COMMON_MOUNTS = ("/media", "/data", "/downloads", "/mnt", "/storage", "/srv")
+
+
+def suggestions(db: Session) -> dict:
+    """qBittorrent's folders that aren't in the list yet, with where each one is
+    inside ScreenMate (through a path mapping, or found by its folder names)."""
+    from . import qbittorrent
+    from .path_suggest import _locate
+    from .pipeline import map_path
+
+    known = qbittorrent.known_folders()
+    if known is None:
+        return {"connected": False, "suggestions": []}
+
+    rows = db.query(DownloadPath).all()
+    listed = {_norm(dp.path) for dp in rows} | {local_of(db, dp) for dp in rows}
+    roots = []
+    for r in [local_of(db, dp) for dp in rows] + list(COMMON_MOUNTS):
+        for cand in (r, os.path.dirname(r.rstrip("/"))):
+            if cand and cand != "/" and os.path.isdir(cand) and cand not in roots:
+                roots.append(cand)
+
+    out = []
+    taken = {dp.name.lower() for dp in rows}
+    for k in known:
+        path = _norm(k["path"])
+        if path in listed:
+            continue
+        local, how = map_path(db, path), "path mapping"
+        if local == path:
+            how = "same path"
+        if not os.path.isdir(local):
+            hit = _locate(path, roots, os.path.isdir)
+            if hit:
+                old, new = hit
+                local, how = _norm(new.rstrip("/") + path[len(old.rstrip("/")):]), "found by name"
+        name = k.get("category") or os.path.basename(path) or path
+        name = name[:1].upper() + name[1:]
+        if name.lower() in taken:   # e.g. a library folder already called Movies
+            name = f"{name} (qBittorrent)"
+        taken.add(name.lower())
+        out.append({
+            "path": path,
+            "name": name,
+            "why": k["why"],
+            "local": local,
+            "visible_here": os.path.isdir(local),
+            "how": how,
+        })
+    out.sort(key=lambda s: (not s["visible_here"], s["path"]))
+    return {"connected": True, "suggestions": out}

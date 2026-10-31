@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, Download, Edit2, FolderOpen, Loader2, Plus, Save, Star, Trash2, Upload } from "lucide-react";
-import { api, SECRET_MASK, type DownloadPath, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
+import { AlertCircle, CheckCircle2, Copy, RefreshCw, Download, Edit2, FolderOpen, Loader2, MinusCircle, Plus, Save, Star, Stethoscope, Trash2, Upload, XCircle } from "lucide-react";
+import { api, SECRET_MASK, type DownloadPath, type FolderSuggestion, type FolderTest, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
 import { PALETTES, useTheme, type Theme } from "../ThemeContext";
 import ImportPanel from "../components/ImportPanel";
@@ -83,6 +83,53 @@ function CheckRow({ label, hint, checked, onChange }: {
 export type FolderForm = {
   name: string; path: string; local_path: string; is_default: boolean; downloads: boolean; scan: boolean;
 };
+
+const CHECK_ICON = {
+  ok:   <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" aria-label="Passed" />,
+  warn: <AlertCircle  className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-label="Warning" />,
+  fail: <XCircle      className="h-3.5 w-3.5 shrink-0 text-red-600 dark:text-red-400" aria-label="Failed" />,
+  skip: <MinusCircle  className="h-3.5 w-3.5 shrink-0 text-gray-400" aria-label="Not checked" />,
+};
+
+/** The result of testing one folder: a checklist, then the likeliest fix. */
+function FolderTestResult({ result }: { result: FolderTest }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { /* clipboard blocked: the text is visible to copy by hand */ }
+  };
+  return (
+    <div className={`mt-2 rounded-lg border p-3 text-xs ${result.ok
+      ? "border-green-200 dark:border-green-900 bg-green-50/60 dark:bg-green-950/20"
+      : "border-red-200 dark:border-red-900 bg-red-50/60 dark:bg-red-950/20"}`} role="status">
+      <p className={`mb-1.5 font-semibold ${result.ok ? "text-green-700 dark:text-green-300" : "text-red-700 dark:text-red-300"}`}>
+        {result.ok ? "ScreenMate can use this folder" : "ScreenMate can't use this folder yet"}
+      </p>
+      <ul className="space-y-1">
+        {result.checks.map((c) => (
+          <li key={c.key} className="flex items-start gap-1.5 text-gray-700 dark:text-gray-300">
+            <span className="mt-px">{CHECK_ICON[c.status]}</span>
+            <span className="min-w-0"><span className="font-medium">{c.label}:</span> <span className="break-words">{c.detail}</span></span>
+          </li>
+        ))}
+      </ul>
+      {result.hint && (
+        <div className="mt-2 border-t border-gray-200 dark:border-gray-700 pt-2 text-gray-700 dark:text-gray-300">
+          <p><span className="font-medium">How to fix:</span> {result.hint.text}</p>
+          {result.hint.copy && (
+            <div className="mt-1.5 flex items-center gap-2">
+              <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded bg-white dark:bg-gray-900 px-2 py-1 font-mono">{result.hint.copy}</code>
+              <button type="button" onClick={() => copy(result.hint!.copy!)}
+                      className="flex shrink-0 items-center gap-1 rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 hover:bg-white dark:hover:bg-gray-800">
+                <Copy className="h-3 w-3" />{copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PathModal({ initial, onClose, onSave }: {
   initial?: DownloadPath;
@@ -441,6 +488,7 @@ export default function Settings() {
   const [testing,          setTesting]          = useState(false);
   const [testResult,       setTestResult]       = useState<{ success: boolean; message: string } | null>(null);
   const [pathModal,        setPathModal]        = useState<DownloadPath | true | null>(null);
+  const [folderTests,      setFolderTests]      = useState<Record<number, FolderTest | "running" | { error: string }>>({});
   const [toast,            setToast]            = useState<string | null>(null);
   const [plexLibraries,    setPlexLibraries]    = useState<PlexLibrary[]>([]);
   const [plexTestResult,   setPlexTestResult]   = useState<PlexTestResult | null>(null);
@@ -474,6 +522,18 @@ export default function Settings() {
     setSettings(s); setPaths(p); setLoading(false);
   };
   useEffect(() => { load(); }, []);
+
+  // Folders qBittorrent already uses, offered for one-click adding (loaded on its own,
+  // so a slow or missing qBittorrent never holds up the page).
+  const [qbFolders, setQbFolders] = useState<FolderSuggestion[]>([]);
+  const [qbChecking, setQbChecking] = useState(false);
+  const loadQbFolders = async () => {
+    setQbChecking(true);
+    try { setQbFolders((await api.paths.suggestions()).suggestions); }
+    catch { setQbFolders([]); }
+    finally { setQbChecking(false); }
+  };
+  useEffect(() => { loadQbFolders(); }, []);
 
   const fetchHealth = async () => {
     try {
@@ -668,15 +728,46 @@ export default function Settings() {
     }
   };
 
+  const testFolder = async (id: number) => {
+    setFolderTests((t) => ({ ...t, [id]: "running" }));
+    try {
+      const r = await api.paths.test(id);
+      setFolderTests((t) => ({ ...t, [id]: r }));
+      load();                                  // refresh "Not found here" and free space
+    } catch (e) {
+      setFolderTests((t) => ({ ...t, [id]: { error: e instanceof Error ? e.message : "Test failed." } }));
+    }
+  };
+
+  const testAllFolders = async () => {
+    for (const p of paths) await testFolder(p.id);
+  };
+
   const handlePathSave = async (data: FolderForm) => {
-    if (pathModal === true) await api.paths.create(data);
-    else if (pathModal && typeof pathModal === "object") await api.paths.update(pathModal.id, data);
+    let saved: DownloadPath | undefined;
+    if (pathModal === true) saved = await api.paths.create(data);
+    else if (pathModal && typeof pathModal === "object") saved = await api.paths.update(pathModal.id, data);
     setPathModal(null); load();
+    if (saved) testFolder(saved.id);   // show straight away whether ScreenMate can use it
+  };
+
+  const addQbFolder = async (f: FolderSuggestion) => {
+    const saved = await api.paths.create({
+      name: f.name,
+      path: f.path,
+      local_path: f.visible_here && f.local !== f.path ? f.local : null,
+      downloads: true,
+      scan: f.visible_here,
+      is_default: paths.every((p) => !p.downloads),
+    });
+    setQbFolders((list) => list.filter((x) => x.path !== f.path));
+    await load();
+    testFolder(saved.id);
   };
 
   const handlePathDelete = async (id: number) => {
     if (!confirm("Remove this folder?")) return;
-    await api.paths.delete(id); load();
+    await api.paths.delete(id); load(); loadQbFolders();
   };
 
   if (loading) return (
@@ -745,13 +836,54 @@ export default function Settings() {
             One list for both: folders qBittorrent downloads into, and folders the Library scans and encodes.
             When qBittorrent sees a folder under a different path, a path mapping (Auto pipeline) or "Path here" connects the two.
           </p>
-          <div className="mb-4 flex justify-end">
+          <div className="mb-4 flex justify-end gap-2">
+            {paths.length > 0 && (
+              <button onClick={testAllFolders} disabled={Object.values(folderTests).includes("running")}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50">
+                <Stethoscope className="h-4 w-4" />
+                Test all
+              </button>
+            )}
             <button onClick={() => setPathModal(true)}
               className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
               <Plus className="h-4 w-4" />
               Add folder
             </button>
           </div>
+          {qbFolders.length > 0 && (
+            <div className="mb-4 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/20 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Found in qBittorrent</p>
+                <button onClick={loadQbFolders} disabled={qbChecking} aria-label="Look again"
+                        className="rounded-lg p-1 text-gray-500 hover:bg-white dark:hover:bg-gray-800 disabled:opacity-50">
+                  <RefreshCw className={`h-3.5 w-3.5 ${qbChecking ? "animate-spin" : ""}`} />
+                </button>
+              </div>
+              <p className="mb-2 text-xs text-gray-600 dark:text-gray-400">Folders qBittorrent saves into that aren't in this list yet.</p>
+              <ul className="space-y-2">
+                {qbFolders.map((f) => (
+                  <li key={f.path} className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-mono text-xs text-gray-900 dark:text-gray-100" title={f.path}>{f.path}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{f.why.join(" · ")}</p>
+                      {f.visible_here ? (
+                        <p className="truncate text-xs text-green-700 dark:text-green-400" title={f.local}>
+                          {f.how === "same path" ? "ScreenMate sees it too" : `ScreenMate sees it at ${f.local}`}
+                          {f.how === "found by name" && " (found by its folder name)"}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-amber-700 dark:text-amber-400">ScreenMate can't see it yet: it will take downloads, and Test shows how to mount it</p>
+                      )}
+                    </div>
+                    <button onClick={() => addQbFolder(f)}
+                            className="flex shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700">
+                      <Plus className="h-3.5 w-3.5" />Add
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {paths.length === 0 ? (
             <div className="rounded-lg border-2 border-dashed border-gray-200 dark:border-gray-700 py-8 text-center text-sm text-gray-400 dark:text-gray-600">
               <FolderOpen className="mx-auto mb-2 h-8 w-8 opacity-40" />
@@ -759,8 +891,9 @@ export default function Settings() {
             </div>
           ) : (
             <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-              {paths.map((p) => (
-                <li key={p.id} className="flex items-center gap-3 py-2.5">
+              {paths.map((p) => { const t = folderTests[p.id]; return (
+                <li key={p.id} className="py-2.5">
+                 <div className="flex items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{p.name}</span>
@@ -786,14 +919,24 @@ export default function Settings() {
                       </p>
                     )}
                   </div>
+                  <button onClick={() => testFolder(p.id)} disabled={t === "running"} aria-label={`Test ${p.name}`}
+                    title="Check that ScreenMate (and qBittorrent) can use this folder"
+                    className="flex items-center gap-1 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50">
+                    {t === "running" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Stethoscope className="h-3.5 w-3.5" />}
+                    Test
+                  </button>
                   <button onClick={() => setPathModal(p)} aria-label={`Edit ${p.name}`} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800">
                     <Edit2 className="h-3.5 w-3.5" />
                   </button>
                   <button onClick={() => handlePathDelete(p.id)} aria-label={`Remove ${p.name}`} className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
+                 </div>
+                 {t && t !== "running" && ("error" in t
+                   ? <p className="mt-2 text-xs text-red-600 dark:text-red-400">{t.error}</p>
+                   : <FolderTestResult result={t} />)}
                 </li>
-              ))}
+              ); })}
             </ul>
           )}
           <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-4 sm:max-w-xs">

@@ -114,6 +114,78 @@ def remove_torrent(info_hash: str, delete_files: bool = False) -> None:
     client.torrents_delete(delete_files=delete_files, torrent_hashes=info_hash)
 
 
+# qBittorrent 5.0 added app/getDirectoryContent in Web API 2.11.2. Older versions
+# answer 404 for the unknown endpoint, the same as 5.x does for a missing folder, so
+# the version decides what a 404 means.
+_DIR_API = (2, 11, 2)
+
+
+def _api_version(client) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in str(client.app_web_api_version()).split("."))
+    except Exception:
+        return ()
+
+
+def directory_exists(path: str) -> bool | None:
+    """Whether qBittorrent can see `path`. None when it can't be asked: not
+    connected, or qBittorrent 4.x, which has no way to check."""
+    try:
+        client = _get_client()
+    except Exception:
+        return None
+    if _api_version(client) < _DIR_API:
+        return None
+    try:
+        client.app_get_directory_content(directory_path=path)
+        return True
+    except Exception as e:
+        # qbittorrentapi's HTTP errors carry the status; 5.x answers 404/409/400
+        # for a folder that doesn't exist or can't be listed.
+        return False if getattr(e, "http_status_code", None) in (400, 404, 409) else None
+
+
+def known_folders(max_torrent_folders: int = 10) -> list[dict] | None:
+    """The folders qBittorrent saves into: its default save path, each category's
+    save path, and the folders its torrents are in (most used first).
+    Returns [{"path", "why", "category"}], or None when qBittorrent can't be reached."""
+    try:
+        client = _get_client()
+    except Exception:
+        return None
+    found: dict[str, dict] = {}
+
+    def note(path, why, category=None):
+        path = (path or "").strip().rstrip("/")
+        if not path:
+            return
+        entry = found.setdefault(path, {"path": path, "why": [], "category": category})
+        if why not in entry["why"]:
+            entry["why"].append(why)
+        entry["category"] = entry["category"] or category
+
+    try:
+        note(client.app_preferences().get("save_path"), "qBittorrent's default save folder")
+    except Exception:
+        pass
+    try:
+        for name, cat in (client.torrents_categories() or {}).items():
+            note((cat or {}).get("savePath") or (cat or {}).get("save_path"), f"category “{name}”", name)
+    except Exception:
+        pass
+    try:
+        counts: dict[str, int] = {}
+        for t in client.torrents_info():
+            sp = (getattr(t, "save_path", "") or "").rstrip("/")
+            if sp:
+                counts[sp] = counts.get(sp, 0) + 1
+        for sp, n in sorted(counts.items(), key=lambda kv: -kv[1])[:max_torrent_folders]:
+            note(sp, f"{n} torrent{'s' if n != 1 else ''} saved here")
+    except Exception:
+        pass
+    return list(found.values())
+
+
 def test_connection() -> tuple[bool, str]:
     try:
         client = _get_client()

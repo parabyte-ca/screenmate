@@ -50,6 +50,8 @@ Media folders are mounted at the same path inside the container. When qBittorren
 
 **Folders** (in Settings) is one list for both halves of the app. Each folder can take downloads, be scanned and encoded, or both. The folders you give `setup.sh --media` appear there automatically. A folder qBittorrent sees under a different path (another container, another machine) is linked by a path mapping or its "Path here" field. When you upgrade from an earlier version, the old download folders and media folders are merged into this list automatically, and nothing that was scanned before stops being scanned.
 
+Each folder has a **Test** button (and **Test all**). It checks that ScreenMate can see, read and write the folder, how much space is free, and, for download folders on qBittorrent 5 or later, that qBittorrent can see it too. When something fails, it says how to fix it, such as the volume line to add to `docker-compose.override.yml`. When qBittorrent is connected, the folders it saves into (its default folder, each category's folder and the folders its torrents are in) that aren't in the list yet appear under **Found in qBittorrent**. Each one shows where ScreenMate sees it, and **Add** adds it in one click.
+
 **Coming from AuTorrent or FileSplitter?** The setup wizard (or **Settings → Data management**) imports your old `autorrent.db` and `filesplitter.db` with one upload each.
 
 ---

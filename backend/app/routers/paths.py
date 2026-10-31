@@ -69,6 +69,12 @@ def _clean(values: dict, current: DownloadPath | None = None) -> dict:
     return values
 
 
+@router.get("/paths/suggestions")
+def path_suggestions(db: Session = Depends(get_db)):
+    """Folders qBittorrent uses that aren't in the list yet (read-only)."""
+    return folders.suggestions(db)
+
+
 @router.post("/paths", response_model=DownloadPathOut, status_code=201)
 def create_path(path: DownloadPathCreate, db: Session = Depends(get_db)):
     values = _clean(path.model_dump())
@@ -108,3 +114,12 @@ def delete_path(path_id: int, db: Session = Depends(get_db)):
     db.commit()
     folders.refresh(db)
     return {"ok": True}
+
+
+@router.post("/paths/{path_id}/test")
+def test_path(path_id: int, db: Session = Depends(get_db)):
+    """Check a saved folder: visible, readable, writable, free space, and qBittorrent's view."""
+    dp = db.query(DownloadPath).filter(DownloadPath.id == path_id).first()
+    if dp is None:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return folders.check(db, dp, _threshold(db))

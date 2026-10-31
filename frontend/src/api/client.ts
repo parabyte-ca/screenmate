@@ -516,6 +516,29 @@ export interface PathTestResult {
 export type MediaStatus = "pending" | "queued" | "processing" | "done" | "error" | "skipped" | "cancelled";
 export type MediaJobType = "encode" | "split" | "trim";
 
+export interface FolderCheck {
+  key: "path" | "visible" | "read" | "write" | "space" | "qbit";
+  label: string;
+  status: "ok" | "warn" | "fail" | "skip";
+  detail: string;
+}
+
+export interface FolderSuggestion {
+  path: string;          // as qBittorrent sees it
+  name: string;
+  why: string[];
+  local: string;         // where ScreenMate would find it
+  visible_here: boolean;
+  how: "same path" | "path mapping" | "found by name";
+}
+
+export interface FolderTest {
+  ok: boolean;
+  local: string;
+  checks: FolderCheck[];
+  hint: { kind: "mount" | "mapping" | "permissions" | "qbit"; text: string; copy?: string } | null;
+}
+
 export interface MediaFile {
   id: number;
   path: string;
@@ -843,6 +866,10 @@ export const api = {
     update: (id: number, data: Partial<FolderInput>) =>
       req<DownloadPath>(`/paths/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     delete: (id: number) => req(`/paths/${id}`, { method: "DELETE" }),
+    /** Check a folder: visible, readable, writable, free space, and qBittorrent's view. */
+    test: (id: number) => req<FolderTest>(`/paths/${id}/test`, { method: "POST" }),
+    /** Folders qBittorrent uses that aren't in the list yet. */
+    suggestions: () => req<{ connected: boolean; suggestions: FolderSuggestion[] }>("/paths/suggestions"),
   },
 
   trakt: {
