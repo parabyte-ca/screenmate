@@ -352,6 +352,8 @@ export interface HelperInfo {
   busy?: boolean;
 }
 
+export type UpgradePhase = "requested" | "started" | "downloading" | "restarting" | "done" | "failed";
+
 export interface UpdateStatus {
   current_version: string;
   latest_release: LatestRelease | null;
@@ -361,6 +363,8 @@ export interface UpdateStatus {
   helper: HelperInfo;
   upgrade_state: "requested" | "running" | "succeeded" | "failed" | null;
   upgrade_message: string | null;
+  /** How far a running upgrade has got (from the helper's log). */
+  upgrade_phase: UpgradePhase | null;
   can_upgrade: boolean;
   previous_version: string | null;
   can_rollback: boolean;

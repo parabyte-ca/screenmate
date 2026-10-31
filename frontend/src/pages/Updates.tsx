@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Clock, Download, RefreshCw, Undo2, Terminal, Wifi, WifiOff } from "lucide-react";
-import { api, type UpdateStatus } from "../api/client";
+import { api, type UpdateStatus, type UpgradePhase } from "../api/client";
 import { marked } from "marked";
 
 marked.setOptions({ async: false });
 
 /** An upgrade started from this browser. ScreenMate restarts during it, so the
  *  page keeps reconnecting until the new version answers (survives a refresh). */
-type Pending = { from: string; to: string; at: number };
+type Pending = { from: string; to: string; at: number; phase?: UpgradePhase };
 const PENDING_KEY = "sm-upgrade-pending";
 const PENDING_MAX_MS = 30 * 60 * 1000;
 
@@ -37,22 +37,90 @@ function elapsedText(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-/** What an upgrade started here is doing, with a running timer. */
+/** The steps an upgrade goes through, in order. */
+const STEPS: { phase: UpgradePhase; label: string }[] = [
+  { phase: "requested",   label: "Requested" },
+  { phase: "started",     label: "Helper started" },
+  { phase: "downloading", label: "Downloading" },
+  { phase: "restarting",  label: "Restarting" },
+  { phase: "done",        label: "Done" },
+];
+const stepIndex = (p?: UpgradePhase | null) => Math.max(0, STEPS.findIndex((s) => s.phase === p));
+/** The further of two phases, so the steps never go backwards. */
+const furthest = (a?: UpgradePhase | null, b?: UpgradePhase | null): UpgradePhase =>
+  (stepIndex(a) >= stepIndex(b) ? a : b) || "requested";
+
+/** How long the last upgrade on this device took, to estimate the next one. */
+const LAST_KEY = "sm-upgrade-last-ms";
+function readLastMs(): number | null {
+  try {
+    const v = Number(localStorage.getItem(LAST_KEY));
+    return v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function writeLastMs(ms: number) {
+  try { localStorage.setItem(LAST_KEY, String(Math.round(ms))); } catch { /* not remembered */ }
+}
+
+/** What an upgrade started here is doing: steps, an estimated bar and a timer. */
 function UpgradeProgress({ pending, everyMinutes, now }: { pending: Pending; everyMinutes: number; now: number }) {
   const elapsed = now - pending.at;
+  const current = stepIndex(pending.phase);
+  const last = readLastMs();
+  // Without history: on average the helper waits half its interval, then ~3 min of work.
+  const estimate = last ?? (everyMinutes / 2 + 3) * 60_000;
+  const pct = Math.min(elapsed / estimate, 0.95);
+  const leftMin = Math.ceil((estimate - elapsed) / 60_000);
   return (
-    <div className="space-y-1">
-      <p>
-        <span className="font-medium">Upgrading to {vtag(pending.to)}</span>
-        {" · "}
-        <span className="font-mono tabular-nums">{elapsedText(elapsed)}</span> elapsed
-      </p>
-      <p className="opacity-90">
-        The helper picks up the request within {everyMinutes} minutes, then downloads the new version and
-        restarts ScreenMate. It stops answering for a minute or two while it restarts; this page reconnects by itself.
+    <div className="space-y-4 w-full min-w-0">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="font-medium">Upgrading to {vtag(pending.to)}</p>
+        <p className="font-mono tabular-nums" aria-label="Time elapsed">{elapsedText(elapsed)}</p>
+      </div>
+
+      <ol className="grid grid-cols-5 gap-1" aria-label="Upgrade steps">
+        {STEPS.map((step, i) => {
+          const done = i < current;
+          const active = i === current;
+          return (
+            <li key={step.phase} className="flex flex-col items-center gap-1.5 text-center min-w-0"
+                aria-current={active ? "step" : undefined}>
+              <div className="flex items-center w-full">
+                <span className={`h-0.5 flex-1 ${i === 0 ? "invisible" : done || active ? "bg-blue-600 dark:bg-blue-400" : "bg-gray-300 dark:bg-gray-700"}`} />
+                <span className={`h-3 w-3 rounded-full shrink-0 ${
+                  done ? "bg-blue-600 dark:bg-blue-400"
+                  : active ? "bg-blue-600 dark:bg-blue-400 ring-4 ring-blue-600/20 dark:ring-blue-400/25 animate-pulse"
+                  : "bg-gray-300 dark:bg-gray-700"}`} />
+                <span className={`h-0.5 flex-1 ${i === STEPS.length - 1 ? "invisible" : done ? "bg-blue-600 dark:bg-blue-400" : "bg-gray-300 dark:bg-gray-700"}`} />
+              </div>
+              <span className={`text-[11px] leading-tight ${active ? "font-semibold" : "opacity-75"}`}>{step.label}</span>
+            </li>
+          );
+        })}
+      </ol>
+
+      <div className="space-y-1.5">
+        <div className="h-2 rounded-full bg-blue-100 dark:bg-blue-950 overflow-hidden" role="progressbar"
+             aria-label="Estimated progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct * 100)}>
+          <div className="h-full rounded-full bg-blue-600 dark:bg-blue-400 transition-[width] duration-1000 ease-linear"
+               style={{ width: `${pct * 100}%` }} />
+        </div>
+        <p className="text-xs opacity-80">
+          {elapsed < estimate
+            ? `About ${leftMin} min left`
+            : "Taking a little longer than last time…"}
+          {" · "}
+          {last ? `last upgrade took ${elapsedText(last)}` : "first-time estimate"}
+        </p>
+      </div>
+
+      <p className="text-xs opacity-80">
+        ScreenMate stops answering for a minute or two while it restarts. This page reconnects by itself.
       </p>
       {elapsed > SLOW_MS && (
-        <p className="opacity-90">
+        <p className="text-xs opacity-90">
           This is taking longer than usual. On the host, check{" "}
           <code className="font-mono">tail -20 upgrade/upgrade.log</code>.
         </p>
@@ -95,7 +163,7 @@ export default function Updates() {
   const logRef = useRef<HTMLPreElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [pending, setPending] = useState<Pending | null>(readPending);
-  const [upgradedTo, setUpgradedTo] = useState<string | null>(null);
+  const [upgraded, setUpgraded] = useState<{ to: string; took: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   // Tick the upgrade timer once a second while an upgrade started here is under way.
@@ -114,14 +182,29 @@ export default function Updates() {
       const p = readPending();
       if (p) {
         const done = s.current_version.replace(/^v/, "") === p.to.replace(/^v/, "");
-        if (done) setUpgradedTo(p.to);
+        if (done) {
+          const took = Date.now() - p.at;
+          writeLastMs(took);
+          setUpgraded({ to: p.to, took });
+        }
         if (done || s.upgrade_state === "failed") {
           writePending(null);
           setPending(null);
+        } else {
+          const next = { ...p, phase: furthest(p.phase, s.upgrade_phase) };
+          writePending(next);
+          setPending(next);
         }
       }
     } catch (e) {
       setError((e as Error).message);
+      // Once the helper has started, losing ScreenMate means it is restarting.
+      const p = readPending();
+      if (p && stepIndex(p.phase) >= stepIndex("started")) {
+        const next = { ...p, phase: furthest(p.phase, "restarting") };
+        writePending(next);
+        setPending(next);
+      }
     } finally {
       if (!quiet) setLoading(false);
     }
@@ -172,8 +255,8 @@ export default function Updates() {
     setConfirm(null);
     setUpgrading(true);
     setShowLog(true);
-    setUpgradedTo(null);
-    const p = { from: status?.current_version ?? "", to: version, at: Date.now() };
+    setUpgraded(null);
+    const p: Pending = { from: status?.current_version ?? "", to: version, at: Date.now(), phase: "requested" };
     writePending(p);
     setPending(p);
     try {
@@ -212,7 +295,6 @@ export default function Updates() {
         <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 space-y-2">
           {pending ? (
             <div className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-              <RefreshCw className="h-4 w-4 shrink-0 mt-0.5 animate-spin text-blue-500" />
               <UpgradeProgress pending={pending} everyMinutes={everyMinutes} now={now} />
             </div>
           ) : (
@@ -244,16 +326,15 @@ export default function Updates() {
         </button>
       </div>
 
-      {upgradedTo && (
+      {upgraded && (
         <div className="flex items-start gap-3 rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 p-4 text-sm text-green-700 dark:text-green-400">
           <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
-          Upgraded to {vtag(upgradedTo)}.
+          Upgraded to {vtag(upgraded.to)} in {elapsedText(upgraded.took)}.
         </div>
       )}
 
       {pending && (
-        <div className="flex items-start gap-3 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-4 text-sm text-blue-700 dark:text-blue-300">
-          <RefreshCw className="h-4 w-4 shrink-0 mt-0.5 animate-spin" />
+        <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-4 text-sm text-blue-700 dark:text-blue-300">
           <UpgradeProgress pending={pending} everyMinutes={everyMinutes} now={now} />
         </div>
       )}
