@@ -1,16 +1,16 @@
 # ScreenMate
 
-**Version 0.8.0**
+**[Latest release](https://github.com/parabyte-ca/screenmate/releases/latest)** · the version you run is shown at the bottom of the sidebar.
 
 A self-hosted media pipeline. It finds shows and movies, downloads them through qBittorrent, then encodes them to x265, splits anthologies, trims intros, renames, and refreshes Plex/Jellyfin, all without you touching a file.
 
 ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search, watchlist, downloads) and [FileSplitter](https://github.com/parabyte-ca/filesplitter) (scan, encode, split) into one app with one UI, one login, one database and one container.
 
-> **Status:** Phase 7 (Insights). The **Insights** page shows the space encoding has saved, your library's codec and resolution mix, encoder speed, and what's left to gain. **Ctrl/⌘+K** opens a command palette, ScreenMate installs as an app, and it sends **push notifications** to your phone (needs HTTPS). Next comes the parity sign-off. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** parity sign-off. Every AuTorrent and FileSplitter feature is in ScreenMate. [docs/PARITY.md](docs/PARITY.md) lists each one, where it is now, and the test that proves it. Next comes 1.0.0. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
-## Planned v1 highlights
+## Highlights
 
 - **Auto pipeline:** rules like "if h264, encode to x265; if anthology, split" run automatically when a download completes or a scan finds a file. A dry-run preview shows what would happen first.
 - **Unified Live Activity:** every item has one live timeline from found → downloaded → encoded → split → in the library, with retry and cancel at any step.
@@ -88,6 +88,20 @@ Your data is stored in `./data/` and is not affected by updates.
 
 ---
 
+## Moving from AuTorrent and FileSplitter
+
+ScreenMate runs on its own port (4260), so you can keep the old apps running until you're happy.
+
+1. Install ScreenMate with `./setup.sh`. Give it the same media folders FileSplitter used (`--media /path`, repeat for each).
+2. In the setup wizard, or later in **Settings → Data management → Import**, upload `autorrent.db` and `filesplitter.db` from each app's `data/` folder. Nothing changes until you press **Import**. Before that, ScreenMate shows you:
+   - what each file contains,
+   - the settings that differ from this install, one choice per setting (versions and update details are never imported),
+   - where your old files and qBittorrent folders are on this server, with suggested path mappings.
+3. Your current database is backed up first, and importing twice is safe.
+4. Check **Activity**, **Library** and **Watchlist**, then stop the old containers: `docker compose down` in each app's folder. Point any bookmarks at port 4260.
+
+---
+
 ## Development
 
 **Requirements:** Python 3.11+, Node.js 20+
@@ -133,6 +147,25 @@ Merging to `main` publishes a release when the merged change warrants one — yo
 | `docs:`, `ci:`, `test:`, `chore:`, `refactor:`, `style:`, `build:` | none (an image is still built) |
 
 The very first release is the version written in the source (`backend/app/routers/health.py`), published by the first `feat:`/`fix:` merge. A check fails any PR whose title doesn't start with one of these types. Add `[skip release]` to a PR title to merge without releasing. When several PRs merge before a build runs, the biggest change wins. A release builds the image (`vX.Y.Z`, `X.Y` and `latest`), then creates the git tag and GitHub release; the in-app **Updates** page offers it. **Release button:** to release right now whatever the titles say — say, a `docs:` merge you do want shipped, or a bigger bump — open the repository's **Actions** tab → *Build and push Docker image* → **Run workflow**, keep branch `main`, and pick `patch`, `minor` or `major`. (`none` just builds the image.) It needs something new since the last release, and ignores `[skip release]`. Pushing a `vX.Y.Z` tag yourself still works and builds exactly that version. The logic lives in `scripts/next_version.py`.
+
+---
+
+## Revision history
+
+Releases after 0.8.0 are listed on the [Releases page](https://github.com/parabyte-ca/screenmate/releases).
+
+| Version | What came in |
+|---|---|
+| 0.8.1 | `update.sh` repairs file ownership and folder permissions before it pulls. |
+| 0.8.0 | First release. Phases 0–7 below, plus: secrets kept off the browser (security audit), new app icon, poster preview, settings comparison and path suggestions on import, Updates under **More** on phones. |
+| Phase 7 | Insights: space saved, codec and resolution mix, encoder speed, what's left to gain. |
+| Phase 6 | Command palette (Ctrl/⌘+K), installable app, push notifications. |
+| Phase 5 | One-click import from AuTorrent and FileSplitter; `setup.sh` installer. |
+| Phase 4 | Library page and Media engine settings. |
+| Phase 3 | Auto pipeline: rules, path mappings, dry run. |
+| Phase 2 | Live Activity page with journeys and an event stream. |
+| Phase 1 | FileSplitter's media engine ported: scan, x265/NVENC encode, split, trim, scene naming, trash. |
+| Phase 0 | Scaffold from AuTorrent: search, watchlist, downloads, history, Plex/Jellyfin, notifications, updates. |
 
 ---
 

@@ -374,6 +374,13 @@ Migration: `ALTER TABLE media_jobs ADD COLUMN journey_id INTEGER`. The `media_jo
 - Everything is worked out from existing tables (no separate ledger to drift). Encodes now record which encoder ran them and how many seconds of video they covered.
 - Click any poster for a larger preview.
 
+# Phase 8: Parity sign-off (in progress)
+- [docs/PARITY.md](PARITY.md): every AuTorrent and FileSplitter feature, where it lives now, and the test or smoke check that proves it.
+- New tests for what had none: NYAA/EZTV/YTS/TorrentGalaxy/1337x parsing, sign out everywhere, removing finished torrents, each scene-detection method on a real clip, TPDB scene naming, NVENC → CPU fallback, and the Plex digest.
+- `frontend/tests/smoke.cjs`: 28 browser checks (every page in both themes, theme and sidebar, palette, backup export, scan → encode, phone navigation).
+- Fixed: scene detection "select" (and so "auto") never found a cut.
+- Next: 1.0.0, then archive the old repositories once you confirm.
+
 ## Follow-ups to flag
 - The `anthropic-skills:autorrent` skill will be out of date. Once Phase 3 lands, replace it with a `screenmate` skill (use `skill-creator`).
 - The `homelab` and `plex` skills may refer to the old ports and containers. Review them after migration.
