@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Cpu, Loader2, Plus, RefreshCw, Save, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, Cpu, Loader2, RefreshCw, Save, Trash2, XCircle } from "lucide-react";
 import { api, type MediaSettings as MS } from "../api/client";
 import { fmtSize } from "../utils";
 
@@ -73,7 +73,7 @@ export default function MediaSettings() {
     setSaving(true);
     setMsg(null);
     try {
-      const body: Record<string, unknown> = { media_paths: paths.map((p) => p.trim()).filter(Boolean) };
+      const body: Record<string, unknown> = {};  // folders are edited in Settings → Folders
       for (const k of NUMERIC) if (form[k] !== "") body[k] = Number(form[k]);
       for (const k of TEXT) body[k] = form[k];
       if (tpdb) body.tpdb_api_key = tpdb;
@@ -102,23 +102,23 @@ export default function MediaSettings() {
 
   return (
     <div className="space-y-6">
-      {/* Media folders */}
+      {/* Media folders come from Settings → Folders */}
       <div>
         <h3 className="mb-1 text-sm font-semibold text-gray-900 dark:text-gray-100">Media folders</h3>
         <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
-          Paths inside the container that the Library scans. Each folder becomes a category. Mount them in <code>docker-compose.yml</code> first.
+          The Library scans the folders ticked <b>Scan &amp; encode</b> in{" "}
+          <a href="#folders" className="font-medium text-blue-600 hover:underline dark:text-blue-400">Folders</a>.
+          Each one becomes a category.
         </p>
-        <div className="space-y-2">
-          {paths.map((p, i) => (
-            <div key={i} className="flex gap-2">
-              <input className={input} value={p} placeholder="/mnt/nas/tv" aria-label={`Media folder ${i + 1}`}
-                     onChange={(e) => setPaths((ps) => ps.map((x, j) => (j === i ? e.target.value : x)))} />
-              <button aria-label="Remove folder" onClick={() => setPaths((ps) => ps.filter((_, j) => j !== i))}
-                      className="rounded p-2 text-gray-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500"><Trash2 className="h-4 w-4" /></button>
-            </div>
-          ))}
-          <button className={btnGhost} onClick={() => setPaths((ps) => [...ps, ""])}><Plus className="h-4 w-4" />Add folder</button>
-        </div>
+        {paths.length ? (
+          <ul className="space-y-1">
+            {paths.map((p) => (
+              <li key={p} className="rounded bg-gray-50 dark:bg-gray-800 px-2 py-1 font-mono text-xs text-gray-700 dark:text-gray-200">{p}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-amber-700 dark:text-amber-400">No folders are scanned yet. Tick “Scan &amp; encode” on a folder in Folders.</p>
+        )}
       </div>
 
       {/* Encoder */}

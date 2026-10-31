@@ -79,37 +79,79 @@ function CheckRow({ label, hint, checked, onChange }: {
 
 // ── Path modal ────────────────────────────────────────────────────────────────
 
+export type FolderForm = {
+  name: string; path: string; local_path: string; is_default: boolean; downloads: boolean; scan: boolean;
+};
+
 function PathModal({ initial, onClose, onSave }: {
   initial?: DownloadPath;
   onClose: () => void;
-  onSave: (d: { name: string; path: string; is_default: boolean }) => void;
+  onSave: (d: FolderForm) => void;
 }) {
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<FolderForm>({
     name: initial?.name ?? "",
     path: initial?.path ?? "",
+    local_path: initial?.local_path ?? "",
     is_default: initial?.is_default ?? false,
+    downloads: initial?.downloads ?? true,
+    scan: initial?.scan ?? true,
   });
-  const valid = form.name.trim() && form.path.trim();
+  const valid = form.name.trim() && form.path.trim() && (form.downloads || form.scan);
+  const set = <K extends keyof FolderForm>(k: K, v: FolderForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-6 shadow-xl">
-        <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
-          {initial ? "Edit folder" : "Add download folder"}
+      <div role="dialog" aria-modal="true" aria-labelledby="folder-dialog-title"
+           className="w-full max-w-md rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-6 shadow-xl">
+        <h2 id="folder-dialog-title" className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
+          {initial ? "Edit folder" : "Add folder"}
         </h2>
         <div className="space-y-3">
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Display name</label>
-            <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. TV Shows" className={FIELD} />
+            <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. TV Shows" className={FIELD} />
+          </div>
+          <div className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+            <label className="flex cursor-pointer items-start gap-2">
+              <input type="checkbox" checked={form.downloads}
+                     onChange={(e) => setForm((f) => ({ ...f, downloads: e.target.checked, is_default: e.target.checked && f.is_default }))}
+                     className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" />
+              <span className="text-sm text-gray-700 dark:text-gray-300">Downloads go here
+                <span className="block text-xs text-gray-500">qBittorrent can save torrents into this folder.</span></span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2">
+              <input type="checkbox" checked={form.scan} onChange={(e) => set("scan", e.target.checked)}
+                     className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" />
+              <span className="text-sm text-gray-700 dark:text-gray-300">Scan &amp; encode
+                <span className="block text-xs text-gray-500">The Library and the Auto pipeline work on files here.</span></span>
+            </label>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Linux path</label>
-            <input value={form.path} onChange={(e) => setForm((f) => ({ ...f, path: e.target.value }))} placeholder="/mnt/nas/tv" className={`${FIELD} font-mono`} />
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              {form.downloads ? "Path as qBittorrent sees it" : "Path"}
+            </label>
+            <input value={form.path} onChange={(e) => set("path", e.target.value)} placeholder="/downloads/tv" className={`${FIELD} font-mono`} />
           </div>
-          <label className="flex cursor-pointer items-center gap-2">
-            <input type="checkbox" checked={form.is_default} onChange={(e) => setForm((f) => ({ ...f, is_default: e.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-blue-600" />
-            <span className="text-sm text-gray-700 dark:text-gray-300">Set as default folder</span>
-          </label>
+          {form.downloads && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Path here (optional)</label>
+              <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">
+                Leave blank when ScreenMate sees the folder at the same path, or when a path mapping covers it.
+                {initial?.local && !initial.local_path && <> Now: <code>{initial.local}</code></>}
+              </p>
+              <input value={form.local_path} onChange={(e) => set("local_path", e.target.value)}
+                     placeholder={initial?.local || "/mnt/nas/tv"} className={`${FIELD} font-mono`} />
+            </div>
+          )}
+          {form.downloads && (
+            <label className="flex cursor-pointer items-center gap-2">
+              <input type="checkbox" checked={form.is_default} onChange={(e) => set("is_default", e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600" />
+              <span className="text-sm text-gray-700 dark:text-gray-300">Default download folder</span>
+            </label>
+          )}
+          {!form.downloads && !form.scan && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">Tick at least one: downloads, or scan &amp; encode.</p>
+          )}
         </div>
         <div className="mt-5 flex gap-3">
           <button onClick={onClose} className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
@@ -350,6 +392,11 @@ export default function Settings() {
   const [settings,         setSettings]         = useState<SettingsType>({});
   const [paths,            setPaths]            = useState<DownloadPath[]>([]);
   const [loading,          setLoading]          = useState(true);
+  // Links like /settings#folders land on that section once the page has loaded.
+  useEffect(() => {
+    if (loading || !window.location.hash) return;
+    document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ block: "start" });
+  }, [loading]);
   const [saving,           setSaving]           = useState(false);
   const [testing,          setTesting]          = useState(false);
   const [testResult,       setTestResult]       = useState<{ success: boolean; message: string } | null>(null);
@@ -581,7 +628,7 @@ export default function Settings() {
     }
   };
 
-  const handlePathSave = async (data: { name: string; path: string; is_default: boolean }) => {
+  const handlePathSave = async (data: FolderForm) => {
     if (pathModal === true) await api.paths.create(data);
     else if (pathModal && typeof pathModal === "object") await api.paths.update(pathModal.id, data);
     setPathModal(null); load();
@@ -651,10 +698,12 @@ export default function Settings() {
           </div>
         </Section>
 
-        {/* Download folders */}
-        <Section title="Download Folders">
+        {/* Folders: where downloads go and where the media engine works */}
+        <div id="folders" className="scroll-mt-4">
+        <Section title="Folders">
           <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
-            These are the folders users can choose when downloading. Paths must be valid on the machine running qBittorrent.
+            One list for both: folders qBittorrent downloads into, and folders the Library scans and encodes.
+            When qBittorrent sees a folder under a different path, a path mapping (Auto pipeline) or "Path here" connects the two.
           </p>
           <div className="mb-4 flex justify-end">
             <button onClick={() => setPathModal(true)}
@@ -666,32 +715,41 @@ export default function Settings() {
           {paths.length === 0 ? (
             <div className="rounded-lg border-2 border-dashed border-gray-200 dark:border-gray-700 py-8 text-center text-sm text-gray-400 dark:text-gray-600">
               <FolderOpen className="mx-auto mb-2 h-8 w-8 opacity-40" />
-              No folders configured yet. Add one above.
+              No folders yet. Add one above.
             </div>
           ) : (
             <ul className="divide-y divide-gray-100 dark:divide-gray-800">
               {paths.map((p) => (
                 <li key={p.id} className="flex items-center gap-3 py-2.5">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{p.name}</span>
                       {p.is_default && (
                         <span className="inline-flex items-center gap-0.5 rounded-full bg-yellow-100 dark:bg-yellow-900/40 px-1.5 py-0.5 text-[10px] font-semibold text-yellow-700 dark:text-yellow-400">
                           <Star className="h-2.5 w-2.5" /> Default
                         </span>
                       )}
+                      {p.downloads && <span className="rounded-full bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300">Downloads</span>}
+                      {p.scan && <span className="rounded-full bg-green-50 dark:bg-green-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-green-700 dark:text-green-300">Scan &amp; encode</span>}
+                      {!p.exists_here && (p.scan || p.downloads) && (
+                        <span className="rounded-full bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+                              title="ScreenMate can't see this folder. Mount it, or add a path mapping.">Not found here</span>
+                      )}
                     </div>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate">{p.path}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate" title={p.path}>{p.path}</p>
+                    {p.local && p.local !== p.path && (
+                      <p className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate" title="Where ScreenMate sees it">here: {p.local}</p>
+                    )}
                     {p.free_bytes != null && (
                       <p className={`text-xs ${p.low_space ? "font-medium text-amber-600 dark:text-amber-400" : "text-gray-400 dark:text-gray-500"}`}>
                         {(p.free_bytes / 1e9).toFixed(1)} GB free{p.low_space ? " — low space" : ""}
                       </p>
                     )}
                   </div>
-                  <button onClick={() => setPathModal(p)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800">
+                  <button onClick={() => setPathModal(p)} aria-label={`Edit ${p.name}`} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800">
                     <Edit2 className="h-3.5 w-3.5" />
                   </button>
-                  <button onClick={() => handlePathDelete(p.id)} className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500">
+                  <button onClick={() => handlePathDelete(p.id)} aria-label={`Remove ${p.name}`} className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500">
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </li>
@@ -708,6 +766,7 @@ export default function Settings() {
             />
           </div>
         </Section>
+        </div>
 
         {/* Auto-scanner */}
         <Section title="Auto-scanner">

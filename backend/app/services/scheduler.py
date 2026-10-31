@@ -20,7 +20,7 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
     """Scan all enabled watchlist items and auto-download new episodes."""
     from sqlalchemy.exc import IntegrityError
     from ..database import SessionLocal
-    from ..models import Download, DownloadHistory, DownloadPath, Setting, WatchlistEpisode, WatchlistItem
+    from ..models import Download, DownloadHistory, Setting, WatchlistEpisode, WatchlistItem
     from .apprise_notify import notify
     from . import episode_guide
     from .candidates import (
@@ -175,15 +175,9 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                     continue
 
                 # Resolve save path
-                save_path = "/downloads"
-                if item.download_path_id:
-                    dp = db.query(DownloadPath).filter(DownloadPath.id == item.download_path_id).first()
-                    if dp:
-                        save_path = dp.path
-                else:
-                    dp = db.query(DownloadPath).filter(DownloadPath.is_default == True).first()
-                    if dp:
-                        save_path = dp.path
+                from .folders import download_folder
+                dp = download_folder(db, item.download_path_id)
+                save_path = dp.path if dp else "/downloads"
 
                 # Capture S/E before incrementing so the record reflects what was downloaded.
                 downloaded_season = item.season

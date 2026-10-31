@@ -81,7 +81,8 @@ export default function OnboardingWizard({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setFolderError(null);
     try {
-      await api.paths.create({ name: folderName.trim(), path: folderPath.trim(), is_default: paths.length === 0 });
+      await api.paths.create({ name: folderName.trim(), path: folderPath.trim(),
+                              is_default: !paths.some((p) => p.downloads !== false && p.is_default) });
       setPaths(await api.paths.list());
       setFolderPath("");
     } catch (err) {

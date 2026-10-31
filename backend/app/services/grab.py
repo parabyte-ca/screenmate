@@ -25,7 +25,7 @@ def grab_episode(db, item, season: int, episode: int) -> dict:
     qBittorrent failure so the caller can report it.
     """
     from ..models import (
-        Download, DownloadHistory, DownloadPath, Setting, WatchlistEpisode,
+        Download, DownloadHistory, Setting, WatchlistEpisode,
     )
     from .apprise_notify import notify
     from .duplicate import check_duplicate
@@ -63,11 +63,8 @@ def grab_episode(db, item, season: int, episode: int) -> dict:
             return {"status": "duplicate",
                     "message": f"{ep_tag} looks like it was already downloaded (matches an existing entry)."}
 
-        dp = None
-        if item.download_path_id:
-            dp = db.query(DownloadPath).filter(DownloadPath.id == item.download_path_id).first()
-        if dp is None:
-            dp = db.query(DownloadPath).filter(DownloadPath.is_default == True).first()  # noqa: E712
+        from .folders import download_folder
+        dp = download_folder(db, item.download_path_id)
         save_path = dp.path if dp else "/downloads"
 
         info_hash = add_torrent(best["magnet"], save_path, category)

@@ -49,6 +49,11 @@ MIGRATIONS: list[tuple[str, str | None]] = [
     ("ALTER TABLE media_jobs ADD COLUMN reason TEXT", None),
     ("ALTER TABLE media_jobs ADD COLUMN encoder TEXT", None),
     ("ALTER TABLE media_jobs ADD COLUMN media_seconds REAL", None),
+    # One Folders list (download folders + media folders). The one-time merge of
+    # the old media_paths setting into these rows is services/folders.merge_once().
+    ("ALTER TABLE download_paths ADD COLUMN local_path TEXT", None),
+    ("ALTER TABLE download_paths ADD COLUMN downloads INTEGER NOT NULL DEFAULT 1", None),
+    ("ALTER TABLE download_paths ADD COLUMN scan INTEGER NOT NULL DEFAULT 1", None),
 ]
 
 

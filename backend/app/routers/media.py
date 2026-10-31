@@ -331,6 +331,14 @@ def update_settings(body: dict = Body(default={})):
     for key, val in body.items():
         if key not in config.SETTINGS_MAP:
             continue
+        if key == "media_paths":
+            # Media folders are rows in the Folders list now; this keeps old callers working.
+            from sqlalchemy.orm import Session
+            from ..services import folders
+            paths = val if isinstance(val, (list, tuple)) else config._parse_paths(str(val))
+            with Session(bind=db._engine()) as s:
+                folders.set_scan_paths(s, [str(p) for p in paths])
+            continue
         if config.apply(key, val):
             db.set_setting(key, config.serialize(key, val))
         else:

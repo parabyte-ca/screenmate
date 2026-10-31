@@ -22,12 +22,18 @@ class DownloadPathCreate(BaseModel):
     name: str
     path: str
     is_default: bool = False
+    local_path: Optional[str] = None   # blank: worked out from the path mappings
+    downloads: bool = True             # qBittorrent may save here
+    scan: bool = True                  # the media engine scans and encodes here
 
 
 class DownloadPathUpdate(BaseModel):
     name: Optional[str] = None
     path: Optional[str] = None
     is_default: Optional[bool] = None
+    local_path: Optional[str] = None
+    downloads: Optional[bool] = None
+    scan: Optional[bool] = None
 
 
 class DownloadPathOut(BaseModel):
@@ -35,6 +41,11 @@ class DownloadPathOut(BaseModel):
     name: str
     path: str
     is_default: bool
+    local_path: Optional[str] = None
+    local: str = ""                    # where the folder is here (local_path or mapped path)
+    exists_here: bool = False
+    downloads: bool = True
+    scan: bool = True
     free_bytes: Optional[int] = None
     total_bytes: Optional[int] = None
     low_space: bool = False

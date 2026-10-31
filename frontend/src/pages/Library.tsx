@@ -334,7 +334,7 @@ export default function Library() {
         ) : files.length === 0 ? (
           <div className="p-10 text-center text-sm text-gray-500 dark:text-gray-400">
             <Film className="mx-auto mb-2 h-6 w-6 text-gray-300 dark:text-gray-600" />
-            No files yet. Check your media folders in <Link to="/settings" className="text-blue-600 hover:underline">Settings → Media engine</Link>, then <b>Scan now</b>.
+            No files yet. Tick <b>Scan &amp; encode</b> on a folder in <Link to="/settings#folders" className="text-blue-600 hover:underline">Settings → Folders</Link>, then <b>Scan now</b>.
           </div>
         ) : rows.length === 0 ? (
           <p className="p-10 text-center text-sm text-gray-500">No files match these filters.</p>

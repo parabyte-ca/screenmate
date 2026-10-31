@@ -144,7 +144,9 @@ def test_full_import_merges_both(target, tmp_path):
         assert s["scan_interval_minutes"] == "30"     # new ones added
         assert s["x265_crf"] == "22" and s["total_saved_bytes"] == "1000"
         # Nothing about the old apps themselves: versions, update state, repo URLs, caches.
-        assert not (set(AUTORRENT_OWN) | set(FILESPLITTER_OWN)) & set(s), set(s)
+        # media_paths is ScreenMate's own list (derived from its Folders), never FileSplitter's.
+        assert not ((set(AUTORRENT_OWN) | set(FILESPLITTER_OWN)) - {"media_paths"}) & set(s), set(s)
+        assert s.get("media_paths") != FILESPLITTER_OWN["media_paths"]
         wl = c.execute(text("SELECT id, download_path_id, profile_id FROM watchlist")).one()
         path_id = c.execute(text("SELECT id FROM download_paths WHERE path='/tv'")).scalar()
         prof_id = c.execute(text("SELECT id FROM quality_profiles WHERE name='HD'")).scalar()

@@ -318,7 +318,7 @@ export default function Search() {
         api.paths.list(),
       ]);
       setResults(res);
-      setPaths(p);
+      setPaths(p.filter((x) => x.downloads !== false));  // only folders downloads can go to
       setSearchHistory((prev) => pushHistory(q, prev));
     } catch (e: unknown) {
       setError((e as Error).message);
