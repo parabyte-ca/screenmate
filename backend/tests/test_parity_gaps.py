@@ -75,6 +75,21 @@ def test_torrentgalaxy_reads_the_ezrss_feed(fake_http):
     assert (r["info_hash"], r["seeds"], r["leeches"], r["size_bytes"], r["source"]) == (HASH, 12, 4, 3_000_000_000, "tgx")
 
 
+def test_nyaa_reads_its_rss_feed(fake_http):
+    from app.services.indexers.nyaa import search_nyaa
+    fake_http["https://nyaa.si/"] = httpx.Response(200, text=f"""<?xml version="1.0"?>
+      <rss xmlns:nyaa="https://nyaa.si/xmlns/nyaa"><channel>
+        <item><title>[Group] Frieren - 01 [1080p]</title><guid>https://nyaa.si/view/1234567</guid>
+          <nyaa:infoHash>{HASH.upper()}</nyaa:infoHash><nyaa:size>1.4 GiB</nyaa:size>
+          <nyaa:seeders>120</nyaa:seeders><nyaa:leechers>3</nyaa:leechers></item>
+        <item><title>no hash</title><guid>https://nyaa.si/view/1</guid></item>
+      </channel></rss>""")
+    [r] = search_nyaa("frieren")
+    assert (r["info_hash"], r["seeds"], r["leeches"], r["source"], r["quality"]) == (HASH, 120, 3, "nyaa", "1080p")
+    assert r["url"] == "https://nyaa.si/view/1234567" and r["magnet"].startswith(f"magnet:?xt=urn:btih:{HASH}")
+    assert r["size_bytes"] > 1_000_000_000
+
+
 def test_1337x_follows_each_result_to_its_magnet(fake_http):
     from app.services.indexers.leet337x import BASE, search_1337x
     fake_http[f"{BASE}/search/"] = httpx.Response(200, text=(
