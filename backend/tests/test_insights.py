@@ -86,6 +86,14 @@ def test_figures(Session):
     assert [x["saved_bytes"] for x in r["top_savings"]] == [999, 600, 100]
 
 
+def test_all_time_never_below_jobs_on_record(Session):
+    with Session() as db:
+        seed(db)
+        db.execute(text("UPDATE settings SET value='0' WHERE key='total_saved_bytes'"))  # counter reset
+        db.commit()
+        assert insights.compute(db)["totals"]["saved_bytes"] == 600 + 100 + 999
+
+
 def test_empty_install(Session):
     with Session() as db:
         r = insights.compute(db)

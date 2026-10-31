@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Activity, ArrowUpCircle, CalendarDays, Clock, Compass, CornerDownLeft, Film, FolderSearch, Monitor, Moon,
-  Pause, Play, Radar, Search, Settings, Sun, Trash2, Tv, type LucideIcon,
+  Pause, Play, Radar, Search, Settings, Sun, Trash2, TrendingUp, Tv, type LucideIcon,
 } from "lucide-react";
 import { api, type Journey, type MediaFile, type WatchlistItem } from "../api/client";
 import { useTheme } from "../ThemeContext";
@@ -27,6 +27,7 @@ export const GO_KEYS: Record<string, { to: string; label: string; icon: LucideIc
   b: { to: "/browse", label: "Browse shows", icon: Compass },
   a: { to: "/activity", label: "Activity", icon: Activity },
   l: { to: "/library", label: "Library", icon: Film },
+  i: { to: "/insights", label: "Insights", icon: TrendingUp },
   h: { to: "/history", label: "History", icon: Clock },
   ",": { to: "/settings", label: "Settings", icon: Settings },
   u: { to: "/updates", label: "Updates", icon: ArrowUpCircle },

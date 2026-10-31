@@ -6,7 +6,7 @@ A self-hosted media pipeline. It finds shows and movies, downloads them through 
 
 ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search, watchlist, downloads) and [FileSplitter](https://github.com/parabyte-ca/filesplitter) (scan, encode, split) into one app with one UI, one login, one database and one container.
 
-> **Status:** Phase 6 (polish). **Ctrl/⌘+K** opens a command palette for any page, action, show or file. ScreenMate installs as an app, and sends **push notifications** to your phone (Settings → Notifications; needs HTTPS, e.g. a Cloudflare Tunnel). Next comes the Insights page. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** Phase 7 (Insights). The **Insights** page shows the space encoding has saved, your library's codec and resolution mix, encoder speed, and what's left to gain. **Ctrl/⌘+K** opens a command palette, ScreenMate installs as an app, and it sends **push notifications** to your phone (needs HTTPS). Next comes the parity sign-off. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 

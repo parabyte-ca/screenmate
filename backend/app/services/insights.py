@@ -146,7 +146,9 @@ def compute(db: Session, days: int = 30) -> dict:
     return {
         "days": days,
         "totals": {
-            "saved_bytes": int(total_row[0]) if total_row and str(total_row[0]).isdigit() else 0,
+            # The counter can be reset in Settings; never show less than the jobs on record.
+            "saved_bytes": max(int(total_row[0]) if total_row and str(total_row[0]).isdigit() else 0,
+                               sum(j.saved_bytes or 0 for j in jobs)),
             "saved_bytes_period": sum(d["saved_bytes"] for d in savings),
             "encodes_period": sum(d["encodes"] for d in savings),
             "downloads_period": sum(d["count"] for d in downloads),

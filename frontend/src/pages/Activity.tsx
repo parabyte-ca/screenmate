@@ -5,6 +5,7 @@ import { api, type ActivityFilter, type Journey, type ProgressEvent } from "../a
 import { useEvent, useLiveConnected } from "../events";
 import { fmtAgo, fmtSize } from "../utils";
 import JourneyDrawer from "../components/JourneyDrawer";
+import Poster from "../components/Poster";
 import {
   applyProgress, fmtEta, fmtSpeed, ProgressBar, STATUS_STYLE, StatusIcon, StepStrip,
 } from "../components/journey";
@@ -29,17 +30,18 @@ function JourneyCard({ j, onOpen }: { j: Journey; onOpen: () => void }) {
   const speed = running ? fmtSpeed(cur?.speed) : null;
   const eta = running ? fmtEta(cur?.eta) : null;
   return (
-    <li>
-      <button onClick={onOpen}
-              className="flex w-full gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/60 focus:outline-none focus-visible:bg-gray-50 dark:focus-visible:bg-gray-800/60">
-        {j.poster_url ? (
-          <img src={j.poster_url} alt="" loading="lazy" className="h-14 w-10 shrink-0 rounded object-cover" />
-        ) : (
-          <div className="flex h-14 w-10 shrink-0 items-center justify-center rounded bg-gray-100 dark:bg-gray-800 text-gray-400">
-            <ActivityIcon className="h-4 w-4" />
-          </div>
-        )}
-        <div className="min-w-0 flex-1">
+    <li className="flex gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/60 focus-within:bg-gray-50 dark:focus-within:bg-gray-800/60">
+      {/* The poster sits outside the card's button: it opens its own preview. */}
+      {j.poster_url ? (
+        <Poster url={j.poster_url} title={j.title} className="h-14 w-10" />
+      ) : (
+        <button onClick={onOpen} tabIndex={-1} aria-hidden
+                className="flex h-14 w-10 shrink-0 items-center justify-center rounded bg-gray-100 dark:bg-gray-800 text-gray-400">
+          <ActivityIcon className="h-4 w-4" />
+        </button>
+      )}
+      <button onClick={onOpen} className="min-w-0 flex-1 text-left focus:outline-none">
+        <div className="min-w-0">
           <div className="flex items-start gap-2">
             <p className="flex-1 text-sm font-medium text-gray-900 dark:text-gray-100 line-clamp-1">{j.title}</p>
             <span className="shrink-0 text-xs text-gray-400">{fmtAgo(j.updated_at)}</span>

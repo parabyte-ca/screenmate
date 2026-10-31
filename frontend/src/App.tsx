@@ -8,6 +8,7 @@ import Search from "./pages/Search";
 import Watchlist from "./pages/Watchlist";
 import Activity from "./pages/Activity";
 import Library from "./pages/Library";
+import Insights from "./pages/Insights";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
 import Updates from "./pages/Updates";
@@ -68,6 +69,7 @@ export default function App() {
             <Route path="/browse" element={<Browse />} />
             <Route path="/activity" element={<Activity />} />
             <Route path="/library" element={<Library />} />
+            <Route path="/insights" element={<Insights />} />
             <Route path="/downloads" element={<Navigate to="/activity" replace />} />
             <Route path="/history" element={<History />} />
             <Route path="/settings" element={<Settings />} />
