@@ -108,16 +108,24 @@ fi
 LOCK_FILE="$UPGRADE_FOLDER/.lock"
 mkdir -p "$UPGRADE_FOLDER"
 exec 9>"$LOCK_FILE"
-flock -n 9 || { info "Another instance is running — exiting."; exit 0; }
+BUSY=false
+flock -n 9 || BUSY=true
 
 # ── Write heartbeat ────────────────────────────────────────────────────────────
+# Every run reports in, even while another run holds the lock (an upgrade in
+# progress), so the app shows "busy" instead of "not reporting".
 
 AGENT_FILE="$UPGRADE_FOLDER/agent.json"
 AGENT_TMP="$AGENT_FILE.tmp.$$"
-printf '{"last_seen":"%s","every_minutes":%d}\n' \
+printf '{"last_seen":"%s","every_minutes":%d,"busy":%s}\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    "$EVERY_MINUTES" > "$AGENT_TMP"
+    "$EVERY_MINUTES" "$BUSY" > "$AGENT_TMP"
 mv -f "$AGENT_TMP" "$AGENT_FILE"
+
+if [[ "$BUSY" == true ]]; then
+    info "Another instance is running — exiting."
+    exit 0
+fi
 
 # ── Check for an upgrade request ──────────────────────────────────────────────
 
@@ -192,12 +200,22 @@ if [[ ! -f "$UPDATE_SH" ]]; then
     exit 0
 fi
 
+# An upgrade that hangs (a stuck pull, a prompt nobody can answer) would hold the
+# lock forever; stop it after UPGRADE_TIMEOUT so the helper recovers on its own.
+UPGRADE_TIMEOUT="${UPGRADE_TIMEOUT:-7200}"
+[[ "$UPGRADE_TIMEOUT" =~ ^[0-9]+$ ]] || UPGRADE_TIMEOUT=7200
+TIMEOUT_CMD=()
+if command -v timeout &>/dev/null; then TIMEOUT_CMD=(timeout --kill-after=60 "$UPGRADE_TIMEOUT"); fi
+
 set +e
 # EXTRA_ARGS holds only allowlisted flags (see above); word splitting is intended.
 # shellcheck disable=SC2086
-bash "$UPDATE_SH" --version "$REQ_VERSION" $EXTRA_ARGS >> "$LOG_FILE" 2>&1
+"${TIMEOUT_CMD[@]}" bash "$UPDATE_SH" --version "$REQ_VERSION" $EXTRA_ARGS >> "$LOG_FILE" 2>&1
 UPDATE_EXIT=$?
 set -e
+if [[ $UPDATE_EXIT -eq 124 || $UPDATE_EXIT -eq 137 ]]; then
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) Stopped: the upgrade ran longer than ${UPGRADE_TIMEOUT}s." >> "$LOG_FILE"
+fi
 
 FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 

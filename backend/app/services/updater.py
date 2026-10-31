@@ -329,6 +329,8 @@ def get_status(db, *, include_log: bool = False) -> dict:
             "connected": helper_connected,
             "last_seen": _cap(agent.get("last_seen"), 50) or None,
             "every_minutes": int(every),
+            # An earlier run still holds the lock (an upgrade in progress).
+            "busy": agent.get("busy") is True,
         },
         "upgrade_state": upgrade_state,
         "upgrade_message": upgrade_message,

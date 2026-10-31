@@ -343,6 +343,8 @@ export interface HelperInfo {
   connected: boolean;
   last_seen: string | null;
   every_minutes: number;
+  /** An earlier run is still working (an upgrade in progress). */
+  busy?: boolean;
 }
 
 export interface UpdateStatus {
