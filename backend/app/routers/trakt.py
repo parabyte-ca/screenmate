@@ -5,6 +5,7 @@ from ..database import get_db
 from ..models import Setting, TraktSeen
 from ..schemas import TraktTestRequest
 from ..services import trakt, trakt_sync
+from ..services.secret_settings import resolve
 
 router = APIRouter()
 
@@ -27,12 +28,13 @@ def trakt_status(db: Session = Depends(get_db)):
 
 
 @router.post("/trakt/test")
-async def test_trakt(body: TraktTestRequest):
+async def test_trakt(body: TraktTestRequest, db: Session = Depends(get_db)):
     """Check the client ID and username against Trakt using the form's current values."""
-    if not body.client_id.strip() or not body.username.strip():
+    client_id = resolve(db, "trakt_client_id", body.client_id.strip())
+    if not client_id or not body.username.strip():
         return {"ok": False, "error": "Enter both the client ID and your Trakt username first."}
     try:
-        shows = await trakt.fetch_watchlist_shows(body.client_id.strip(), body.username.strip())
+        shows = await trakt.fetch_watchlist_shows(client_id, body.username.strip())
     except trakt.TraktError as exc:
         return {"ok": False, "error": str(exc)}
     return {"ok": True, "shows": len(shows)}

@@ -51,6 +51,12 @@ export default defineConfig({
       },
     }),
   ],
+  // Production bundles ship without source maps, and only VITE_-prefixed env vars
+  // could ever be inlined (the app reads none): secrets stay on the server.
+  build: {
+    sourcemap: false,
+  },
+  envPrefix: "VITE_",
   server: {
     proxy: {
       "/api": {

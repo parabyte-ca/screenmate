@@ -1,0 +1,16 @@
+# Keep the build context free of local data and secrets.
+.git
+.github
+.env
+.env.*
+!.env.example
+data/
+upgrade/
+docker-compose.override.yml*
+**/*.db
+**/*.db-*
+**/node_modules
+frontend/dist
+**/__pycache__
+**/.pytest_cache
+backend/tests
