@@ -11,7 +11,7 @@ from . import config
 
 logger = logging.getLogger(__name__)
 
-_PTS_RE    = re.compile(r"pts_time=([0-9]+(?:\.[0-9]+)?)")
+_PTS_RE    = re.compile(r"pts_time[:=]([0-9]+(?:\.[0-9]+)?)")  # metadata=print writes "pts_time:6"
 _TIME_RE   = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
 _BLACK_RE  = re.compile(r"black_start:([0-9.]+).*?black_end:([0-9.]+)")
 _FREEZE_RE = re.compile(r"freeze_(start|end):\s*([0-9.]+)")
