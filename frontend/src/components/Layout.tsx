@@ -9,7 +9,6 @@ import {
   ChevronRight,
   Clock,
   Command,
-  Download,
   Film,
   LogOut,
   MonitorDown,
@@ -21,6 +20,7 @@ import {
   TrendingUp,
   Tv,
 } from "lucide-react";
+import AppLogo from "./AppLogo";
 import { useTheme, type Theme } from "../ThemeContext";
 import { authStore } from "../auth";
 import { api } from "../api/client";
@@ -137,9 +137,7 @@ export default function Layout() {
             collapsed ? "justify-center px-0 py-5" : "gap-2 px-4 py-5"
           }`}
         >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600">
-            <Download className="h-4 w-4 text-white" />
-          </div>
+          <AppLogo className="h-8 w-8" />
           {!collapsed && (
             <>
               <span className="flex-1 text-lg font-bold text-gray-900 dark:text-gray-100">

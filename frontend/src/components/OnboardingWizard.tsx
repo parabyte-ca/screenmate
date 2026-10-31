@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertCircle, CheckCircle2, Download, FolderOpen, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, FolderOpen, Loader2 } from "lucide-react";
+import AppLogo from "./AppLogo";
 import { api, type DownloadPath, type JackettTestResult } from "../api/client";
 import ImportPanel from "./ImportPanel";
 
@@ -142,7 +143,7 @@ export default function OnboardingWizard({ onClose }: { onClose: () => void }) {
 
         {name === "Welcome" && (
           <>
-            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600"><Download className="h-5 w-5 text-white" /></div>
+            <AppLogo className="mb-3 h-11 w-11" />
             <h2 id="onb-title" className="text-xl font-semibold text-gray-900 dark:text-gray-100">Welcome to ScreenMate</h2>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
               ScreenMate watches the shows you pick, downloads new episodes through qBittorrent and tidies them into your library. A few quick steps get you going:

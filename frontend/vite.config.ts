@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.ico", "apple-touch-icon.png", "icons/*.png"],
+      includeAssets: ["favicon.ico", "logo.svg", "apple-touch-icon.png", "icons/*.png"],
       manifest: {
         name: "ScreenMate",
         short_name: "ScreenMate",
@@ -33,7 +33,14 @@ export default defineConfig({
             src: "/icons/pwa-512x512.png",
             sizes: "512x512",
             type: "image/png",
-            purpose: "any maskable",
+            purpose: "any",
+          },
+          {
+            // Full-bleed artwork inside the 80% safe zone, for launchers that crop to a shape
+            src: "/icons/maskable-512x512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
           },
         ],
       },

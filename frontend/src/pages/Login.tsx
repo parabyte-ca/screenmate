@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Download, Loader2, Lock } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
+import AppLogo from "../components/AppLogo";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { authStore } from "../auth";
@@ -31,9 +32,7 @@ export default function Login() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600">
-            <Download className="h-6 w-6 text-white" />
-          </div>
+          <AppLogo className="h-12 w-12" />
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">ScreenMate</h1>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Sign in to continue</p>
