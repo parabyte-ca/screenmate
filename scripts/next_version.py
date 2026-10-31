@@ -12,6 +12,9 @@ Runs in the build workflow and prints ``key=value`` lines for ``$GITHUB_OUTPUT``
 Rules
 -----
 * Tag build (someone pushed vX.Y.Z): build exactly that; nothing new to release.
+* No release tag yet: the first release is the version written in the source
+  (backend/app/routers/health.py), published by the first releasable merge or
+  the release button; until then builds report that version.
 * Branch build: look at everything merged since the latest release tag.
     - a breaking change ("type!:" or a "BREAKING CHANGE:" footer)  -> major
     - "feat:"                                                      -> minor
@@ -155,12 +158,6 @@ def decide(env: dict[str, str]) -> dict[str, str]:
         return {"version": version, "tag": tag, "minor": minor, "bump": "none", "release": "false"}
 
     tag = latest_release_tag()
-    if tag is None:
-        version = fallback_version()
-        return {"version": version, "tag": f"v{version}", "minor": ".".join(version.split(".")[:2]),
-                "bump": "none", "release": "false"}
-
-    current = parse_tag(tag)
     head_message = git("log", "-1", "--format=%B").strip()
     default_branch = env.get("DEFAULT_BRANCH")
     on_default = not default_branch or env.get("GITHUB_REF_NAME") == default_branch
@@ -170,11 +167,25 @@ def decide(env: dict[str, str]) -> dict[str, str]:
         kind = forced if messages_since(tag) else None   # nothing new: nothing to release
     elif on_default and not SKIP_MARKER.search(head_message):
         kind = classify(messages_since(tag))
+    taken = set(git("tag", "--list", "v*").split())
+
+    if tag is None:
+        # No release yet: the first one is the version written in the source (not a
+        # bump of it), published as soon as something releasable is merged.
+        version = fallback_version()
+        first = parse_tag(f"v{version}")
+        if kind is not None and first:
+            first = first_free(first, taken)
+            return {"version": fmt(first), "tag": f"v{fmt(first)}", "minor": f"{first[0]}.{first[1]}",
+                    "bump": kind, "release": "true"}
+        return {"version": version, "tag": f"v{version}", "minor": ".".join(version.split(".")[:2]),
+                "bump": "none", "release": "false"}
+
+    current = parse_tag(tag)
     if kind is None:
         return {"version": fmt(current), "tag": tag, "minor": f"{current[0]}.{current[1]}",
                 "bump": "none", "release": "false"}
 
-    taken = set(git("tag", "--list", "v*").split())
     new = first_free(bump(current, kind), taken)
     return {"version": fmt(new), "tag": f"v{fmt(new)}", "minor": f"{new[0]}.{new[1]}",
             "bump": kind, "release": "true"}

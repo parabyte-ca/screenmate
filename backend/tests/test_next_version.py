@@ -177,15 +177,46 @@ def test_unreachable_higher_tag_does_not_become_the_base(repo):
     assert after_release(repo, "fix: x")["version"] == "2.6.1"
 
 
-def test_before_any_release_exists_the_source_default_is_reported_and_nothing_releases(tmp_path):
+@pytest.fixture()
+def fresh(tmp_path):
+    """No release yet; the source says 0.8.0."""
     r = tmp_path / "fresh"
     (r / "backend" / "app" / "routers").mkdir(parents=True)
-    (r / "backend" / "app" / "routers" / "health.py").write_text('"2.4.0"\n')
+    (r / "backend" / "app" / "routers" / "health.py").write_text('"0.8.0"\n')
     git(r, "init", "-q")
     git(r, "symbolic-ref", "HEAD", "refs/heads/main")
-    commit(r, "feat: first")
-    out = decide(r)
-    assert (out["version"], out["release"], out["bump"]) == ("2.4.0", "false", "none")
+    commit(r, "initial")
+    return r
+
+
+@pytest.mark.parametrize("message", ["feat: first", "fix: first", "Merge pull request #1 from x/y\n\nfeat: first"])
+def test_the_first_release_is_the_version_in_the_source(fresh, message):
+    out = after_release(fresh, message, DEFAULT_BRANCH="main")
+    assert (out["version"], out["tag"], out["minor"], out["release"]) == ("0.8.0", "v0.8.0", "0.8", "true")
+
+
+@pytest.mark.parametrize("message", ["docs: readme", "chore: tidy", "Phase 7: not conventional",
+                                     "feat: first [skip release]"])
+def test_before_any_release_only_releasable_changes_publish_it(fresh, message):
+    out = after_release(fresh, message, DEFAULT_BRANCH="main")
+    assert (out["version"], out["release"], out["bump"]) == ("0.8.0", "false", "none")
+
+
+def test_the_release_button_publishes_the_first_release(fresh):
+    out = after_release(fresh, "docs: x", GITHUB_EVENT_NAME="workflow_dispatch", FORCE_BUMP="patch")
+    assert (out["version"], out["release"]) == ("0.8.0", "true")
+
+
+def test_the_first_release_only_comes_from_the_default_branch(fresh):
+    out = after_release(fresh, "feat: x", GITHUB_REF_NAME="feature", DEFAULT_BRANCH="main")
+    assert out["release"] == "false"
+
+
+def test_after_the_first_release_bumps_continue_from_it(fresh):
+    commit(fresh, "feat: first")
+    git(fresh, "tag", "v0.8.0")
+    out = after_release(fresh, "feat: second")
+    assert (out["version"], out["release"]) == ("0.9.0", "true")
 
 
 # ── opting out and where a release may come from ──────────────────────────────
