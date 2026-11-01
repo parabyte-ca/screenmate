@@ -93,9 +93,9 @@ const CHECK_ICON = {
 
 /** The result of testing one folder: a checklist, then the likeliest fix. */
 function FolderTestResult({ result }: { result: FolderTest }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async (text: string) => {
-    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+  const [copied, setCopied] = useState<number | null>(null);
+  const copy = async (text: string, i: number) => {
+    try { await navigator.clipboard.writeText(text); setCopied(i); setTimeout(() => setCopied(null), 1500); }
     catch { /* clipboard blocked: the text is visible to copy by hand */ }
   };
   return (
@@ -116,15 +116,18 @@ function FolderTestResult({ result }: { result: FolderTest }) {
       {result.hint && (
         <div className="mt-2 border-t border-gray-200 dark:border-gray-700 pt-2 text-gray-700 dark:text-gray-300">
           <p><span className="font-medium">How to fix:</span> {result.hint.text}</p>
-          {result.hint.copy && (
-            <div className="mt-1.5 flex items-center gap-2">
-              <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded bg-white dark:bg-gray-900 px-2 py-1 font-mono">{result.hint.copy}</code>
-              <button type="button" onClick={() => copy(result.hint!.copy!)}
-                      className="flex shrink-0 items-center gap-1 rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 hover:bg-white dark:hover:bg-gray-800">
-                <Copy className="h-3 w-3" />{copied ? "Copied" : "Copy"}
-              </button>
+          {result.hint.steps?.map((st, i) => (
+            <div key={i} className="mt-1.5">
+              <p className="mb-0.5 text-gray-500 dark:text-gray-400">{st.label}</p>
+              <div className="flex items-center gap-2">
+                <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded bg-white dark:bg-gray-900 px-2 py-1 font-mono">{st.copy}</code>
+                <button type="button" onClick={() => copy(st.copy, i)}
+                        className="flex shrink-0 items-center gap-1 rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 hover:bg-white dark:hover:bg-gray-800">
+                  <Copy className="h-3 w-3" />{copied === i ? "Copied" : "Copy"}
+                </button>
+              </div>
             </div>
-          )}
+          ))}
         </div>
       )}
     </div>

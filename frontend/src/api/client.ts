@@ -536,7 +536,11 @@ export interface FolderTest {
   ok: boolean;
   local: string;
   checks: FolderCheck[];
-  hint: { kind: "mount" | "mapping" | "permissions" | "qbit"; text: string; copy?: string } | null;
+  hint: {
+    kind: "mount" | "mapping" | "permissions" | "qbit" | "same-as-qbit";
+    text: string;
+    steps?: { label: string; copy: string }[];   // copyable commands or lines
+  } | null;
 }
 
 export interface MediaFile {

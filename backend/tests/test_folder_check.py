@@ -78,7 +78,7 @@ def test_a_missing_folder_names_what_does_exist_and_how_to_mount_it(client, Sess
     assert not r["ok"] and c["visible"]["status"] == "fail"
     assert f"{tmp_path} does" in c["visible"]["detail"]
     assert c["write"]["status"] == "skip"
-    assert r["hint"]["kind"] == "mount" and r["hint"]["copy"].endswith(f":{tmp_path}/nas/tv")
+    assert r["hint"]["kind"] == "mount" and r["hint"]["steps"][0]["copy"].endswith(f":{tmp_path}/nas/tv")
 
 
 def test_a_mapped_folder_says_so_and_blames_the_mapping_when_wrong(client, Session, tmp_path):
@@ -242,3 +242,22 @@ def test_a_suggestion_does_not_reuse_a_folders_name(client, Session, tmp_path, m
                         lambda: [{"path": "/downloads/movies", "why": ["x"], "category": "movies"}])
     [s] = client.get("/api/paths/suggestions").json()["suggestions"]
     assert s["name"] == "Movies (qBittorrent)"
+
+
+def test_qbittorrent_sees_it_but_screenmate_does_not(client, Session, monkeypatch):
+    # Downloads finish inside qBittorrent's mount, which ScreenMate doesn't have.
+    monkeypatch.setattr(qbittorrent, "directory_exists", lambda p: True)
+    fid = add(Session, path="/mnt/video/tv shows", downloads=True)
+    r = client.post(f"/api/paths/{fid}/test").json()
+    assert not r["ok"] and r["hint"]["kind"] == "same-as-qbit"
+    inspect, volume = (s["copy"] for s in r["hint"]["steps"])
+    assert inspect.startswith("docker inspect qbittorrent")
+    assert volume == "- /host/folder/from/step/1:/mnt/video"
+    assert "/mnt/video" in r["hint"]["text"]
+
+
+def test_volume_lines_with_spaces_are_quoted():
+    assert folders._volume_line("/h", "/mnt/video/tv shows") == '- "/h:/mnt/video/tv shows"'
+    assert folders._volume_line("/h", "/downloads") == "- /h:/downloads"
+    assert folders._mount_root("/downloads/tv") == "/downloads"
+    assert folders._mount_root("/mnt/video/tv shows") == "/mnt/video"
