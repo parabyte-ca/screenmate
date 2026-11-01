@@ -226,6 +226,42 @@ def _count_videos(root: str) -> tuple[int, bool]:
     return found, False
 
 
+def _volume_line(host: str, container: str) -> str:
+    """A docker-compose volume entry; quoted when a path has a space or colon-like risk."""
+    entry = f"{host}:{container}"
+    return f'- "{entry}"' if any(c in entry for c in " #") else f"- {entry}"
+
+
+def _mount_root(path: str) -> str:
+    """The folder a container most likely has mounted for `path`: /mnt/video for
+    /mnt/video/tv shows, /downloads for /downloads/tv."""
+    parts = [p for p in path.split("/") if p]
+    if not parts:
+        return "/"
+    depth = 2 if parts[0] in ("mnt", "media", "data", "srv", "storage", "volume1", "share") and len(parts) > 1 else 1
+    return "/" + "/".join(parts[:depth])
+
+
+def _same_as_qbit_hint(qbit_path: str, local: str) -> dict:
+    """qBittorrent can see the folder and ScreenMate can't: downloads land in
+    qBittorrent's mount, so give ScreenMate the same host folder at the same path."""
+    root = _mount_root(qbit_path) if local == qbit_path else _mount_root(local)
+    return {
+        "kind": "same-as-qbit",
+        "text": (f"qBittorrent saves into {qbit_path} inside its own container, and ScreenMate doesn't have that "
+                 f"folder mounted, so downloads finish where only qBittorrent can see them. Find the host folder "
+                 f"qBittorrent mounts at {root} (step 1; on TrueNAS it's also under the qBittorrent app's Storage "
+                 f"settings), put it on the left of the volume line, add that line under volumes in "
+                 f"docker-compose.override.yml, then run: docker compose up -d. Using the same path inside both "
+                 f"containers means no path mapping is needed."),
+        "steps": [
+            {"label": "1. Show qBittorrent's mounts (on the host; use your qBittorrent container's name)",
+             "copy": "docker inspect qbittorrent --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'"},
+            {"label": "2. Volume line for ScreenMate", "copy": _volume_line("/host/folder/from/step/1", root)},
+        ],
+    }
+
+
 def check(db: Session, dp: DownloadPath, low_threshold: int = 0) -> dict:
     """Can ScreenMate (and qBittorrent) use this folder? A checklist plus the likeliest fix."""
     from .disk_space import is_low
@@ -252,7 +288,7 @@ def check(db: Session, dp: DownloadPath, low_threshold: int = 0) -> dict:
                 {"kind": "mount",
                  "text": "Mount the folder into ScreenMate: add this under volumes in docker-compose.override.yml, "
                          "replacing the left side with the folder's path on the host, then run: docker compose up -d",
-                 "copy": f"- /path/on/host:{local}"})
+                 "steps": [{"label": "Volume line", "copy": _volume_line("/path/on/host", local)}]})
         for key, label in (("read", "Readable"), ("write", "Writable"), ("space", "Free space")):
             add(key, label, "skip", "Not checked: the folder isn't visible")
     else:
@@ -295,6 +331,8 @@ def check(db: Session, dp: DownloadPath, low_threshold: int = 0) -> dict:
         seen = qbittorrent.directory_exists(dp.path)
         if seen is True:
             add("qbit", "qBittorrent sees it", "ok", f"qBittorrent can open {dp.path}")
+            if not visible and hint and hint["kind"] == "mount":
+                hint = _same_as_qbit_hint(dp.path, local)
         elif seen is False:
             add("qbit", "qBittorrent sees it", "fail", f"qBittorrent can't find {dp.path}")
             hint = hint or {"kind": "qbit",
